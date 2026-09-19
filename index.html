@@ -188,7 +188,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.4';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '0.5';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -368,6 +368,69 @@ function runPoints(){
   const st = first ? Math.max(1, streak() + 1) : 0;   // まだ保存前なので今日のぶんを足す
   const sb = first ? Math.min(st * 2, STREAK_BONUS_MAX) : 0;
   return {items, base, bonus, streakDays:st, streakBonus:sb, total:base + bonus + sb};
+}
+
+/* ========== サイトに載せる用の書き出し ==========
+   公開するのは数字だけ。種目名・作業名・ごほうびの中身は入れない。     */
+function summary(){
+  const now = new Date();
+  const days = {};
+  const touch = ds => (days[ds] = days[ds] || {d:ds, lv:0, pt:0, min:0});
+  const cats = {};
+  const bumpCat = (id, times, min, pt) => {
+    const c = cats[id] = cats[id] || {times:0, minutes:0, points:0};
+    c.times += times; c.minutes += min; c.points += pt;
+  };
+
+  db.logs.forEach(l => {
+    const day = touch(l.date);
+    day.pt += l.points || 0;
+    if(l.mode === 'rest'){ day.lv = Math.max(day.lv, 0); day.rest = true; return; }
+    if(l.mode === 'spot'){
+      day.min += l.minutes || 0;
+      day.lv = day.lv >= 1 ? 3 : 1;
+      bumpCat(l.cat || 'other', 1, l.minutes || 0, l.points || 0);
+      return;
+    }
+    const done = (l.entries || []).filter(en => en.done);
+    const weight = done.reduce((s,en) => { const e = exById(en.exerciseId); return s + (e ? e.points : 0); }, 0);
+    done.forEach(en => {
+      const e = exById(en.exerciseId);
+      if(!e) return;
+      const min = en.minutes || e.minutes || 0;
+      day.min += min;
+      bumpCat(e.cat, 1, min, Math.round(weight ? (l.points || 0) * e.points / weight
+                                               : (l.points || 0) / done.length));
+    });
+    day.lv = day.lv >= 1 ? 3 : (l.mode === 'full' ? 2 : 1);
+  });
+
+  // いちばん長く続いた日数。ストリークと同じ数え方をする
+  // （休んだ日と、予定のない日では切れない）
+  const ds = Object.keys(days).sort();
+  let best = 0, cur = 0;
+  if(ds.length){
+    for(let d = parseDate(ds[0]); d <= now; d = addDays(d, 1)){
+      const k = fmtDate(d), day = days[k];
+      if(day && day.lv > 0){ cur++; best = Math.max(best, cur); }
+      else if((day && day.rest) || !menusOn(d).length){ /* 切れない */ }
+      else cur = 0;
+    }
+  }
+
+  return {
+    generated: fmtDate(now) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()),
+    build: BUILD,
+    streak: streak(),
+    bestStreak: best,
+    level: level(),
+    points: earned(),
+    totalTimes: db.logs.filter(l => l.mode !== 'rest').length,
+    totalMinutes: Object.values(days).reduce((s,x) => s + x.min, 0),
+    cats: CATS.filter(c => cats[c.id]).map(c => Object.assign(
+      {id:c.id, name:c.name, color:COLORS[c.color]}, cats[c.id])),
+    days: ds.map(d => days[d]).filter(x => x.lv > 0 || x.rest)
+  };
 }
 
 /* ========== ストリーク ========== */
@@ -794,6 +857,19 @@ function viewRecords(){
       (r.e.unit !== 'チェック' ? ' ・ 合計 ' + r.amount + r.e.unit : '') + '</div></div></div>';
   });
 
+  // サイトに載せる用の書き出し
+  h += '<h2>サイトに載せる</h2>' +
+    '<div class="card"><div class="items" style="margin-bottom:12px">' +
+    'もそもそ奮闘記に載せる用のデータを作ります。出るのは数字だけで、' +
+    '種目名やスポット作業の中身は入りません。</div>' +
+    '<div class="btns"><button class="primary" data-act="export">書き出してコピー</button>' +
+    '<button data-act="exportfile">ファイルで保存</button></div>' +
+    '<div id="exportbox" style="display:none;margin-top:10px">' +
+    '<textarea id="exporttext" readonly style="width:100%;height:120px;font-size:11px;' +
+    'border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);' +
+    'color:var(--text);font-family:monospace"></textarea>' +
+    '<div class="items">コピーできないときは、ここを長押しして選んでください。</div></div></div>';
+
   // 最近の記録
   const recent = db.logs.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0, 12);
   if(recent.length){
@@ -1059,6 +1135,29 @@ document.getElementById('app').addEventListener('click', ev => {
     if(!confirm('このメニューを削除します。記録は残ります。')) return;
     db.menus = db.menus.filter(m => m.id !== view.draft.id);
     save(); return go('menus');
+  }
+
+  // 書き出し
+  if(act === 'export' || act === 'exportfile'){
+    const json = JSON.stringify(summary(), null, 1);
+    if(act === 'exportfile'){
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], {type:'application/json'}));
+      a.download = 'records.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+      return;
+    }
+    const box = document.getElementById('exportbox');
+    const ta = document.getElementById('exporttext');
+    box.style.display = 'block';
+    ta.value = json;
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(json)
+        .then(() => alert('コピーしました。貼りつければサイトに反映できます。'))
+        .catch(() => ta.select());
+    } else { ta.select(); }
+    return;
   }
 
   // スポット作業
