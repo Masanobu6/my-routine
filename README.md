@@ -4,16 +4,33 @@
 
 ## 使い方
 
-`index.html` をブラウザで開くだけ。サーバーもログインも要らない。
-データはその端末のブラウザの中（localStorage）に入る。
+**https://masanobu6.github.io/my-routine/**
 
-スマホで試すときは、PCでこのフォルダを配ってスマホから開く:
+データはその端末のブラウザの中（localStorage）に入る。サーバーには何も送らない。
+
+### スマホに入れる（Android Chrome）
+
+1. 上のURLを Chrome で開く
+2. 右上の ⋮ →「アプリをインストール」（または「ホーム画面に追加」）
+3. ホーム画面のアイコンから開くと、アドレスバーの無い全画面になる
+
+インストールには HTTPS が要る。`http://192.168.x.x` のようなLANのアドレスでは、
+Chrome はインストールを提案しないし Service Worker も動かない。
+
+### 手元で直す
+
+`index.html` をブラウザで直接開けば、そのまま動く（Service Worker だけは動かない）。
+ローカルでサーバーを立てるなら:
 
 ```bash
-python -m http.server 8790 --bind 0.0.0.0 --directory C:/ClaudeCode/my-routine
+python -m http.server 8790 --bind 127.0.0.1 --directory C:/ClaudeCode/my-routine
 ```
 
-同じWi-Fiのスマホから `http://<PCのIPアドレス>:8790/` を開く。
+### 公開しなおす
+
+`git push` するだけ。GitHub Pages が1〜2分でビルドして差し替わる。
+スマホ側は再読み込みすれば最新になる（Service Worker はネットワーク優先にしてある）。
+どの版を見ているかは「ごほうび」画面のいちばん下に出る（v0.2 など）。
 
 ## 画面
 
@@ -44,9 +61,17 @@ python -m http.server 8790 --bind 0.0.0.0 --directory C:/ClaudeCode/my-routine
 - **ミニ版**は量を3割にしてセットを1回に落とす。ポイントは半分だがゼロではない。ゼロの日を作らないため。
 - **ストリークは折れにくく**してある。「休む」を押した日と、そもそも予定のない日はカウントを切らない。何もしないで放置した日だけ切れる。
 
-## 第1弾に入っていないもの
+## まだ入っていないもの
 
-- 通知（Web Push）。設計は通知を足せる形にしてあるが、送信側の仕組みが別に要る
-- 種目ごとの伸びグラフ、週次のふりかえり、ごほうびポイント
-- ホーム画面へのインストール（manifest と service worker）
-- 端末をまたぐ同期
+- 通知（Web Push）。送信側の仕組み（Cloudflare Workers の cron など）が別に要る
+- 種目ごとの伸びグラフ、週次のふりかえり
+- 端末をまたぐ同期（いまは端末ごとに別のデータ）
+
+## ファイル
+
+| ファイル | 中身 |
+|---|---|
+| `index.html` | アプリ全部（HTML・CSS・JS） |
+| `sw.js` | Service Worker。ネットワーク優先、つながらないときだけキャッシュ |
+| `manifest.webmanifest` | アプリ名・アイコン・全画面表示の設定 |
+| `icon-*.png` ほか | アイコン（生成元の考え方：オレンジ地に白いチェック） |
