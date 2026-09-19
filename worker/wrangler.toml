@@ -1,0 +1,8 @@
+name = "my-routine-records"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+# npx wrangler kv namespace create RECORDS で作って、出てきた id をここに書く
+[[kv_namespaces]]
+binding = "RECORDS"
+id = "ここにKVのidを入れる"

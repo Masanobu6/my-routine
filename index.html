@@ -188,7 +188,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.5';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '0.6';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -253,7 +253,9 @@ function seed(){
       {id:uid(), name:'ゲーム1時間', cost:150},
       {id:uid(), name:'マンガを1冊買う', cost:200}
     ],
-    redemptions:[]
+    redemptions:[],
+    // 送信先とあいことばは、このスマホの中だけ。書き出すデータには入らない
+    sync:{url:'', key:'', auto:false}
   };
 }
 function load(){
@@ -264,6 +266,7 @@ function load(){
   if(!d.rewards) d.rewards = [];
   if(!d.redemptions) d.redemptions = [];
   if(!d.spots) d.spots = [];
+  if(!d.sync) d.sync = {url:'', key:'', auto:false};
   d.exercises.forEach(e => {
     if(typeof e.points !== 'number') e.points = 10;
     // カテゴリと目安の時間は後から足した。色から見当をつけ、分の種目は量をそのまま使う
@@ -432,6 +435,29 @@ function summary(){
     days: ds.map(d => days[d]).filter(x => x.lv > 0 || x.rest)
   };
 }
+
+/* 書き出したものを、あずかり所へ送る。失敗しても記録そのものは無事 */
+function sendSummary(manual){
+  const s = db.sync || {};
+  if(!s.url){ if(manual) alert('送信先のURLを入れてください。'); return; }
+  const now = new Date();
+  const stamp = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  fetch(s.url, {method:'POST',
+                headers:{'content-type':'application/json', 'x-key':s.key || ''},
+                body:JSON.stringify(summary())})
+    .then(r => {
+      db.sync.last = r.ok ? todayStr() + ' ' + stamp + ' に送信'
+                          : todayStr() + ' ' + stamp + ' 失敗（' + r.status + '）';
+      save();
+      if(manual){ alert(r.ok ? 'サイトに送りました。' : '送れませんでした（' + r.status + '）'); render(); }
+    })
+    .catch(() => {
+      db.sync.last = todayStr() + ' ' + stamp + ' 失敗（つながらない）';
+      save();
+      if(manual){ alert('送れませんでした。電波かURLを確かめてください。'); render(); }
+    });
+}
+const autoSend = () => { if(db.sync && db.sync.auto && db.sync.url) sendSummary(false); };
 
 /* ========== ストリーク ========== */
 function streak(){
@@ -870,6 +896,23 @@ function viewRecords(){
     'color:var(--text);font-family:monospace"></textarea>' +
     '<div class="items">コピーできないときは、ここを長押しして選んでください。</div></div></div>';
 
+  // 自動で送る設定
+  const sy = db.sync || {};
+  h += '<div class="card"><div class="card-top"><b>自動で送る</b></div>' +
+    '<div class="items" style="margin-bottom:10px">あずかり所を用意すると、' +
+    'やり終えるたびに自動でサイトが新しくなります。' +
+    'URLとあいことばはこのスマホの中だけに入り、書き出すデータには入りません。</div>' +
+    '<div class="field"><label>送信先のURL</label>' +
+    '<input data-sync="url" value="' + esc(sy.url || '') + '" placeholder="https://....workers.dev"></div>' +
+    '<div class="field"><label>あいことば</label>' +
+    '<input type="password" data-sync="key" value="' + esc(sy.key || '') + '"></div>' +
+    '<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:12px">' +
+    '<input type="checkbox" data-sync="auto" style="width:20px;height:20px"' +
+    (sy.auto ? ' checked' : '') + '>やり終えるたびに自動で送る</label>' +
+    '<div class="btns"><button data-act="sendnow">今すぐ送る</button></div>' +
+    (sy.last ? '<div class="items" style="margin:10px 0 0">' + esc(sy.last) + '</div>' : '') +
+    '</div>';
+
   // 最近の記録
   const recent = db.logs.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0, 12);
   if(recent.length){
@@ -977,6 +1020,7 @@ function finishRun(){
     })
   });
   save();
+  autoSend();
   render();
 }
 
@@ -1137,6 +1181,8 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return go('menus');
   }
 
+  if(act === 'sendnow') return sendSummary(true);
+
   // 書き出し
   if(act === 'export' || act === 'exportfile'){
     const json = JSON.stringify(summary(), null, 1);
@@ -1194,7 +1240,7 @@ document.getElementById('app').addEventListener('click', ev => {
     s.done = true; s.doneDate = ds;
     db.logs.push({id:'spot_' + s.id, date:ds, spotId:s.id, mode:'spot',
                   points:s.points + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name});
-    save(); render();
+    save(); autoSend(); render();
     if(sb) setTimeout(() => alert('+' + (s.points + sb) + 'pt（うち連続ボーナス +' + sb + '）'), 30);
     return;
   }
@@ -1281,6 +1327,11 @@ document.getElementById('app').addEventListener('click', ev => {
 // 入力は再描画せずに draft へ流し込む（打っている途中で消えないように）
 document.getElementById('app').addEventListener('input', ev => {
   const t = ev.target;
+  if(t.dataset.sync && t.type !== 'checkbox'){
+    db.sync[t.dataset.sync] = t.value.trim();
+    save();
+    return;
+  }
   if(!view.draft) return;
   if(t.dataset.field){
     const f = t.dataset.field;
@@ -1296,6 +1347,11 @@ document.getElementById('app').addEventListener('input', ev => {
 
 document.getElementById('app').addEventListener('change', ev => {
   const t = ev.target;
+  if(t.dataset.sync === 'auto'){
+    db.sync.auto = t.checked;
+    save();
+    return;
+  }
   if(t.dataset.act === 'additem' && t.value){
     view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
     render();
