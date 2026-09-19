@@ -71,9 +71,6 @@ h2{font-size:14px;color:var(--muted);font-weight:600;margin:22px 2px 10px;letter
 .days button{flex:1;min-width:0;padding:10px 0;border-radius:9px;border:1px solid var(--line);
   background:var(--card);font-size:14px}
 .days button.on{background:var(--accent);color:#fff;border-color:transparent;font-weight:700}
-.swatches{display:flex;gap:8px}
-.swatches button{width:34px;height:34px;border-radius:50%;border:2px solid transparent}
-.swatches button.on{border-color:var(--text)}
 .mitem{background:var(--card);border:1px solid var(--line);
   border-radius:12px;padding:10px 12px;margin-bottom:8px}
 .mitem .mhead{display:flex;align-items:center;gap:8px}
@@ -124,6 +121,19 @@ body.running #tabs{display:none}
 .prog{height:4px;background:var(--line);border-radius:2px;margin:10px 0 0;overflow:hidden}
 .prog i{display:block;height:100%;background:var(--accent);transition:width .25s}
 
+.spot{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.spot.done{opacity:.6}
+.spot.done .nm{text-decoration:line-through}
+.spot .grow{flex:1;min-width:0;background:none}
+.spot .nm{font-weight:600;font-size:15px}
+.spot .meta{font-size:12px;color:var(--muted);margin-top:1px}
+.spot .get{padding:9px 14px;border-radius:10px;background:var(--accent);color:#fff;
+  font-weight:700;font-size:14px;flex:none}
+.cats{display:flex;gap:6px;flex-wrap:wrap}
+.cats button{padding:9px 14px;border-radius:999px;border:1px solid var(--line);
+  background:var(--card);font-size:14px}
+.cats button.on{color:#fff;border-color:transparent;font-weight:700}
 .ptpill{display:inline-flex;align-items:center;gap:4px;background:var(--soft);color:var(--accent);
   font-weight:800;font-size:13px;padding:4px 11px;border-radius:999px;white-space:nowrap}
 .headright{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
@@ -178,11 +188,21 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.3';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '0.4';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
                 purple:'#7a5ea1', pink:'#c2566f', gray:'#7b7b80'};
+// カテゴリ。色はここで決まる（種目とスポット作業で共通）
+const CATS = [
+  {id:'it',      name:'IT',         color:'blue'},
+  {id:'finance', name:'ファイナンス', color:'green'},
+  {id:'english', name:'英語',        color:'purple'},
+  {id:'muscle',  name:'筋トレ',      color:'orange'},
+  {id:'other',   name:'その他',      color:'gray'}
+];
+const catOf    = id => CATS.find(c => c.id === id) || CATS[CATS.length - 1];
+const catColor = id => COLORS[catOf(id).color];
 const MINI_RATE = 0.3;
 
 const uid = () => Math.random().toString(36).slice(2,9);
@@ -201,13 +221,14 @@ let run = null;
 let installEvt = null;   // Chrome が「入れられる」と言ってきたら入る
 
 function seed(){
-  const ex = (name,unit,amount,color,points) => ({id:uid(), name, unit, amount, color, points});
-  const stretch = ex('ストレッチ','チェック',0,'green',5);
-  const squat   = ex('スクワット','回',30,'orange',10);
-  const pushup  = ex('腕立て伏せ','回',20,'orange',10);
-  const plank   = ex('プランク','秒',60,'purple',10);
-  const words   = ex('英単語','個',20,'blue',15);
-  const read    = ex('読書','分',15,'pink',10);
+  const ex = (name,unit,amount,cat,points,minutes) =>
+    ({id:uid(), name, unit, amount, cat, points, minutes});
+  const stretch = ex('ストレッチ','チェック',0,'muscle',5,5);
+  const squat   = ex('スクワット','回',30,'muscle',10,5);
+  const pushup  = ex('腕立て伏せ','回',20,'muscle',10,5);
+  const plank   = ex('プランク','秒',60,'muscle',10,2);
+  const words   = ex('英単語','個',20,'english',15,15);
+  const read    = ex('読書','分',15,'other',10,15);
   return {
     exercises:[stretch,squat,pushup,plank,words,read],
     menus:[
@@ -223,6 +244,10 @@ function seed(){
         {exerciseId:words.id, amount:20, sets:1, rest:0}]}
     ],
     logs:[],
+    spots:[
+      {id:uid(), name:'確定申告の書類をそろえる', cat:'finance', minutes:60, points:30,
+       date:todayStr(), done:false}
+    ],
     rewards:[
       {id:uid(), name:'好きなラーメンを食べる', cost:300},
       {id:uid(), name:'ゲーム1時間', cost:150},
@@ -238,7 +263,13 @@ function load(){
   // 古いデータをポイント対応にする
   if(!d.rewards) d.rewards = [];
   if(!d.redemptions) d.redemptions = [];
-  d.exercises.forEach(e => { if(typeof e.points !== 'number') e.points = 10; });
+  if(!d.spots) d.spots = [];
+  d.exercises.forEach(e => {
+    if(typeof e.points !== 'number') e.points = 10;
+    // カテゴリと目安の時間は後から足した。色から見当をつけ、分の種目は量をそのまま使う
+    if(!e.cat) e.cat = e.color === 'orange' ? 'muscle' : e.color === 'blue' ? 'it' : 'other';
+    if(typeof e.minutes !== 'number') e.minutes = e.unit === '分' ? (e.amount || 0) : 0;
+  });
   d.logs.forEach(l => {
     if(typeof l.points === 'number') return;
     if(l.mode === 'rest' || !l.entries){ l.points = 0; return; }
@@ -261,6 +292,29 @@ const menuById = id => db.menus.find(m => m.id === id);
 const menusOn  = date => db.menus.filter(m => m.days.includes(date.getDay()));
 const logsOn   = ds => db.logs.filter(l => l.date === ds);
 const logFor   = (ds, menuId) => db.logs.find(l => l.date === ds && l.menuId === menuId);
+
+/* スポット作業＝1回かぎりの用事。予定日が来たら「今日」に出る */
+const spotById   = id => db.spots.find(s => s.id === id);
+const spotsToday = () => db.spots.filter(s => !s.done && s.date <= todayStr())
+                                 .sort((a,b) => a.date.localeCompare(b.date));
+const spotsLater = () => db.spots.filter(s => !s.done && s.date > todayStr())
+                                 .sort((a,b) => a.date.localeCompare(b.date));
+function minutesText(m){
+  if(!m) return '';
+  return m >= 60 ? (m % 60 ? Math.floor(m/60) + '時間' + (m%60) + '分' : Math.floor(m/60) + '時間')
+                 : m + '分';
+}
+/* 今日これからやる分の、目安の合計時間 */
+function todayMinutes(){
+  const ds = todayStr();
+  let m = 0;
+  menusOn(new Date()).forEach(mn => {
+    if(logFor(ds, mn.id)) return;
+    mn.items.forEach(it => { const e = exById(it.exerciseId); if(e) m += (e.minutes || 0) * Math.max(1, it.sets); });
+  });
+  spotsToday().forEach(s => { m += s.minutes || 0; });
+  return m;
+}
 
 function amountText(amount, unit){
   if(unit === 'チェック') return '';
@@ -310,7 +364,7 @@ function runPoints(){
   const all = run.queue.every(q => q.done);
   const bonus = all ? (mini ? half(COMPLETE_BONUS) : COMPLETE_BONUS) : 0;
   // その日ぜんぶで最初の完了なら連続ボーナス
-  const first = !logsOn(todayStr()).some(l => l.mode === 'full' || l.mode === 'mini');
+  const first = !logsOn(todayStr()).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
   const st = first ? Math.max(1, streak() + 1) : 0;   // まだ保存前なので今日のぶんを足す
   const sb = first ? Math.min(st * 2, STREAK_BONUS_MAX) : 0;
   return {items, base, bonus, streakDays:st, streakBonus:sb, total:base + bonus + sb};
@@ -322,7 +376,7 @@ function streak(){
   for(let i = 0; i < 400; i++){
     const ds = fmtDate(d);
     const ls = logsOn(ds);
-    const did  = ls.some(l => l.mode === 'full' || l.mode === 'mini');
+    const did  = ls.some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
     const rest = ls.some(l => l.mode === 'rest');
     const sched = menusOn(d).length > 0;
     if(did) n++;
@@ -339,11 +393,16 @@ function viewToday(){
   const list = menusOn(now).slice().sort((a,b) => (a.time||'').localeCompare(b.time||''));
   const others = db.menus.filter(m => !list.includes(m));
   const st = streak();
-  const allDone = list.length > 0 && list.every(m => logFor(ds, m.id));
+  const spots = spotsToday();
+  const allDone = list.length > 0 && list.every(m => logFor(ds, m.id)) && !spots.length;
+  const mins = todayMinutes();
+  const rest = (list.length ? list.filter(m => !logFor(ds, m.id)).length + ' メニュー' : '') +
+               (list.length && spots.length ? '＋' : '') +
+               (spots.length ? 'スポット ' + spots.length + '件' : '');
 
   let h = '<div class="wrap"><div class="head"><div>' +
     '<div class="date">' + (now.getMonth()+1) + '月' + now.getDate() + '日(' + DAYS[now.getDay()] + ')</div>' +
-    '<div class="sub">' + (list.length ? '今日は ' + list.length + ' メニュー' : '今日は予定なし') + '</div>' +
+    '<div class="sub">' + (rest ? 'のこり ' + rest + (mins ? ' ・ ' + minutesText(mins) : '') : '今日の分はもうありません') + '</div>' +
     '</div><div class="headright">' +
     '<div class="ptpill">★ ' + balance() + ' pt</div>' +
     (st > 0 ? '<div class="streak">🔥 ' + st + '日つづいている</div>' : '') +
@@ -366,12 +425,48 @@ function viewToday(){
   }
   list.forEach(m => { h += menuCard(m, ds); });
 
+  // スポット作業
+  h += '<h2>スポット作業</h2>';
+  if(!spots.length) h += '<div class="empty" style="padding:14px">いまは空です。</div>';
+  spots.forEach(s => { h += spotRow(s, ds); });
+  h += '<button class="addbtn" data-act="newspot">＋ スポット作業を足す</button>';
+
+  const later = spotsLater();
+  if(later.length){
+    h += '<h2>この先の予定</h2>';
+    later.forEach(s => { h += spotRow(s, ds, true); });
+  }
+  const doneSpots = db.spots.filter(s => s.done && s.doneDate === ds);
+  if(doneSpots.length){
+    h += '<h2>今日おわらせた</h2>';
+    doneSpots.forEach(s => { h += spotRow(s, ds); });
+  }
+
   if(others.length){
     h += '<h2>ほかのメニュー</h2>';
     others.forEach(m => { h += menuCard(m, ds, true); });
   }
   return h + '</div>';
 }
+
+function spotRow(s, ds, later){
+  const late = !s.done && s.date < ds;
+  const meta = [catOf(s.cat).name, minutesText(s.minutes), s.points + 'pt']
+    .filter(Boolean).join(' ・ ');
+  return '<div class="spot' + (s.done ? ' done' : '') + '">' +
+    '<span class="dot" style="background:' + catColor(s.cat) + '"></span>' +
+    '<button class="grow" data-act="editspot" data-id="' + s.id + '" style="text-align:left">' +
+    '<div class="nm">' + esc(s.name) + '</div>' +
+    '<div class="meta">' + meta +
+      (late ? ' ・ <b style="color:var(--accent)">' + daysLate(s.date, ds) + '日すぎ</b>' : '') +
+      (later ? ' ・ ' + mdText(s.date) : '') + '</div></button>' +
+    (s.done
+      ? '<button class="iconbtn" data-act="undospot" data-id="' + s.id + '">↩</button>'
+      : '<button class="get" data-act="dospot" data-id="' + s.id + '">やった</button>') +
+    '</div>';
+}
+const mdText = ds => { const d = parseDate(ds); return (d.getMonth()+1) + '/' + d.getDate(); };
+const daysLate = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
 
 function menuCard(m, ds, other){
   const log = logFor(ds, m.id);
@@ -432,7 +527,7 @@ function viewMenuEdit(){
     const e = exById(it.exerciseId);
     if(!e) return;
     h += '<div class="mitem"><div class="mhead">' +
-      '<span class="dot" style="background:' + (COLORS[e.color] || COLORS.gray) + '"></span>' +
+      '<span class="dot" style="background:' + catColor(e.cat) + '"></span>' +
       '<div class="grow"><div class="nm">' + esc(e.name) + '</div></div>' +
       '<button class="iconbtn" data-act="itemup" data-i="' + i + '">↑</button>' +
       '<button class="iconbtn" data-act="itemdel" data-i="' + i + '">✕</button></div>' +
@@ -464,9 +559,11 @@ function viewExercises(){
   db.exercises.forEach(e => {
     const used = db.menus.filter(m => m.items.some(it => it.exerciseId === e.id)).length;
     h += '<button class="row" data-act="editex" data-id="' + e.id + '">' +
-      '<span class="dot" style="background:' + (COLORS[e.color] || COLORS.gray) + '"></span>' +
+      '<span class="dot" style="background:' + catColor(e.cat) + '"></span>' +
       '<div><div class="name">' + esc(e.name) + '</div>' +
-      '<div class="meta">' + (amountText(e.amount, e.unit) || 'チェックするだけ') +
+      '<div class="meta">' + catOf(e.cat).name + ' ・ ' +
+      (amountText(e.amount, e.unit) || 'チェックするだけ') +
+      (e.minutes ? ' ・ ' + minutesText(e.minutes) : '') +
       ' ・ ' + e.points + 'pt' + (used ? ' ・ ' + used + 'メニューで使用' : '') + '</div></div>' +
       '<span class="go">›</span></button>';
   });
@@ -484,20 +581,46 @@ function viewExEdit(){
   h += '</select></div><div style="flex:1"><label>ふだんの量</label>' +
     '<input inputmode="numeric" data-field="amount" value="' + e.amount + '"' +
     (e.unit === 'チェック' ? ' disabled' : '') + '></div></div></div>' +
-    '<div class="field"><label>もらえるポイント</label>' +
-    '<input inputmode="numeric" data-field="points" value="' + e.points + '">' +
+    catPicker(e.cat) +
+    '<div class="field"><div class="inline">' +
+    '<div style="flex:1"><label>かかる時間（分）</label>' +
+    '<input inputmode="numeric" data-field="minutes" value="' + e.minutes + '"></div>' +
+    '<div style="flex:1"><label>もらえるポイント</label>' +
+    '<input inputmode="numeric" data-field="points" value="' + e.points + '"></div></div>' +
     '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
-    'この種目を1つ終えるたびに入るポイント。きつい種目ほど高くすると続けやすい。</div></div>' +
-    '<div class="field"><label>色</label><div class="swatches">';
-  Object.keys(COLORS).forEach(c => {
-    h += '<button class="' + (e.color === c ? 'on' : '') + '" data-act="color" data-c="' + c +
-         '" style="background:' + COLORS[c] + '"></button>';
-  });
-  h += '</div></div><div class="bar">' +
+    '時間は目安。今日あと何分ぶん残っているかの計算に使う。' +
+    'ポイントはきつい種目ほど高くすると続けやすい。</div></div>';
+  h += '<div class="bar">' +
     '<button class="primary" data-act="saveex">保存する</button>' +
     (view.isNew ? '' : '<button class="danger" data-act="delex">削除</button>') +
     '</div></div>';
   return h;
+}
+
+/* ========== 画面：スポット作業の編集 ========== */
+function catPicker(sel){
+  return '<div class="field"><label>カテゴリ</label><div class="cats">' +
+    CATS.map(c => '<button class="' + (sel === c.id ? 'on' : '') + '" data-act="cat" data-c="' + c.id +
+      '"' + (sel === c.id ? ' style="background:' + COLORS[c.color] + '"' : '') + '>' +
+      c.name + '</button>').join('') + '</div></div>';
+}
+
+function viewSpotEdit(){
+  const s = view.draft;
+  return '<div class="wrap"><button class="back" data-act="tab" data-tab="today">‹ 今日</button>' +
+    '<div class="field"><label>やること</label>' +
+    '<input data-field="name" value="' + esc(s.name) + '" placeholder="確定申告の書類をそろえる"></div>' +
+    catPicker(s.cat) +
+    '<div class="field"><div class="inline">' +
+    '<div style="flex:1"><label>かかる時間（分）</label>' +
+    '<input inputmode="numeric" data-field="minutes" value="' + s.minutes + '"></div>' +
+    '<div style="flex:1"><label>もらえるポイント</label>' +
+    '<input inputmode="numeric" data-field="points" value="' + s.points + '"></div></div></div>' +
+    '<div class="field"><label>やる日</label>' +
+    '<input type="date" data-field="date" value="' + s.date + '"></div>' +
+    '<div class="bar"><button class="primary" data-act="savespot">保存する</button>' +
+    (view.isNew ? '' : '<button class="danger" data-act="delspot">削除</button>') +
+    '</div></div>';
 }
 
 /* ========== 画面：ごほうび ========== */
@@ -566,7 +689,7 @@ function viewRecords(){
   for(let i = 0; i <= now.getDay(); i++){
     const d = addDays(weekStart, i);
     wPlan += menusOn(d).length;
-    wDone += logsOn(fmtDate(d)).filter(l => l.mode !== 'rest').length;
+    wDone += logsOn(fmtDate(d)).filter(l => l.mode === 'full' || l.mode === 'mini').length;
   }
   let wPt = 0;
   for(let i = 0; i <= now.getDay(); i++) wPt += ptOn(fmtDate(addDays(weekStart, i)));
@@ -595,7 +718,7 @@ function viewRecords(){
       else {
         const ls = logsOn(ds);
         const full = ls.filter(l => l.mode === 'full').length;
-        const mini = ls.filter(l => l.mode === 'mini').length;
+        const mini = ls.filter(l => l.mode === 'mini' || l.mode === 'spot').length;
         if(full + mini >= 2) cls += ' l3';
         else if(full) cls += ' l2';
         else if(mini) cls += ' l1';
@@ -609,8 +732,49 @@ function viewRecords(){
     '<span><i style="background:var(--accent)"></i>完了</span>' +
     '<span><i style="background:var(--muted);opacity:.3"></i>休んだ</span></div>';
 
-  // 直近30日の種目ごとの合計
+  // 直近30日のカテゴリごとの合計
   const from = fmtDate(addDays(now, -29));
+  const byCat = {};
+  const bump = (cat, times, minutes, points) => {
+    if(!byCat[cat]) byCat[cat] = {times:0, minutes:0, points:0};
+    byCat[cat].times  += times;
+    byCat[cat].minutes += minutes;
+    byCat[cat].points += points;
+  };
+  db.logs.filter(l => l.date >= from).forEach(l => {
+    if(l.mode === 'rest') return;
+    if(l.mode === 'spot'){ bump(l.cat || 'other', 1, l.minutes || 0, l.points || 0); return; }
+    if(!l.entries) return;
+    const doneEntries = l.entries.filter(en => en.done);
+    // メニューのポイントは1本ぶんをまとめて持っているので、種目の重みで割って配る
+    const weight = doneEntries.reduce((s,en) => {
+      const e = exById(en.exerciseId); return s + (e ? e.points : 0);
+    }, 0);
+    doneEntries.forEach(en => {
+      const e = exById(en.exerciseId);
+      if(!e) return;
+      const share = weight ? (l.points || 0) * e.points / weight
+                           : (l.points || 0) / doneEntries.length;
+      bump(e.cat, 1, en.minutes || e.minutes || 0, Math.round(share));
+    });
+  });
+  const catRows = CATS.map(c => Object.assign({c}, byCat[c.id] || {times:0, minutes:0, points:0}))
+                      .filter(r => r.times > 0)
+                      .sort((a,b) => b.minutes - a.minutes || b.times - a.times);
+  const maxMin = Math.max(1, ...catRows.map(r => r.minutes));
+  h += '<h2>この30日 カテゴリ別</h2>';
+  if(!catRows.length) h += '<div class="empty">まだ記録がありません。</div>';
+  catRows.forEach(r => {
+    h += '<div class="row" style="display:block"><div style="display:flex;align-items:center;gap:10px">' +
+      '<span class="dot" style="background:' + COLORS[r.c.color] + '"></span>' +
+      '<div class="name">' + r.c.name + '</div>' +
+      '<div class="meta" style="margin-left:auto">' + r.times + '回 ・ ' +
+      (r.minutes ? minutesText(r.minutes) + ' ・ ' : '') + r.points + 'pt</div></div>' +
+      '<div class="lvbar" style="margin-top:8px"><i style="width:' +
+      Math.round(r.minutes / maxMin * 100) + '%;background:' + COLORS[r.c.color] + '"></i></div></div>';
+  });
+
+  // 直近30日の種目ごとの合計
   const tot = {};
   db.logs.filter(l => l.date >= from && l.entries).forEach(l => {
     l.entries.filter(en => en.done).forEach(en => {
@@ -622,10 +786,9 @@ function viewRecords(){
     });
   });
   const rows = Object.values(tot).sort((a,b) => b.times - a.times);
-  h += '<h2>この30日の合計</h2>';
-  if(!rows.length) h += '<div class="empty">まだ記録がありません。</div>';
+  h += '<h2>この30日 種目ごと</h2>';
   rows.forEach(r => {
-    h += '<div class="row"><span class="dot" style="background:' + (COLORS[r.e.color] || COLORS.gray) + '"></span>' +
+    h += '<div class="row"><span class="dot" style="background:' + catColor(r.e.cat) + '"></span>' +
       '<div><div class="name">' + esc(r.e.name) + '</div>' +
       '<div class="meta">' + r.times + '回やった' +
       (r.e.unit !== 'チェック' ? ' ・ 合計 ' + r.amount + r.e.unit : '') + '</div></div></div>';
@@ -638,9 +801,11 @@ function viewRecords(){
     recent.forEach(l => {
       const m = menuById(l.menuId);
       const d = parseDate(l.date);
+      const title = l.mode === 'spot' ? (l.name || 'スポット作業') : (m ? m.name : 'メニュー');
       h += '<div class="row"><div><div class="name">' + ((d.getMonth()+1) + '/' + d.getDate() + ' ' +
-        esc(m ? m.name : 'メニュー')) + '</div><div class="meta">' +
-        (l.mode === 'rest' ? '休んだ' : l.mode === 'mini' ? 'ミニ版' : '完了') +
+        esc(title)) + '</div><div class="meta">' +
+        (l.mode === 'rest' ? '休んだ' : l.mode === 'mini' ? 'ミニ版'
+          : l.mode === 'spot' ? 'スポット作業' : '完了') +
         (l.points ? ' ・ +' + l.points + 'pt' : '') +
         (l.durationSec ? ' ・ ' + Math.round(l.durationSec / 60) + '分' : '') + '</div></div>' +
         '<button class="iconbtn" data-act="dellog" data-id="' + l.id + '" style="margin-left:auto">✕</button></div>';
@@ -729,8 +894,11 @@ function finishRun(){
   db.logs.push({
     id: ds + '_' + run.menuId, date: ds, menuId: run.menuId, mode: run.mode,
     durationSec: run.durationSec, points: run.gain.total,
-    entries: run.queue.map(q => ({exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0),
-                                 done:q.done}))
+    entries: run.queue.map(q => {
+      const e = exById(q.exerciseId);
+      return {exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0), done:q.done,
+              minutes:(e ? e.minutes || 0 : 0) * (q.setDone || 0)};
+    })
   });
   save();
   render();
@@ -785,13 +953,15 @@ function render(){
   else if(view.name === 'menuEdit') h = viewMenuEdit();
   else if(view.name === 'exercises') h = viewExercises();
   else if(view.name === 'exEdit') h = viewExEdit();
+  else if(view.name === 'spotEdit') h = viewSpotEdit();
   else if(view.name === 'rewards') h = viewRewards();
   else if(view.name === 'rewardEdit') h = viewRewardEdit();
   else if(view.name === 'records') h = viewRecords();
   app.innerHTML = h;
   const tabName = view.name === 'menuEdit' ? 'menus' :
                   view.name === 'exEdit' ? 'exercises' :
-                  view.name === 'rewardEdit' ? 'rewards' : view.name;
+                  view.name === 'rewardEdit' ? 'rewards' :
+                  view.name === 'spotEdit' ? 'today' : view.name;
   document.querySelectorAll('#tabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab === tabName);
   });
@@ -891,6 +1061,58 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return go('menus');
   }
 
+  // スポット作業
+  if(act === 'newspot'){
+    view = {name:'spotEdit', isNew:true,
+            draft:{id:uid(), name:'', cat:'other', minutes:30, points:20, date:todayStr(), done:false}};
+    return render();
+  }
+  if(act === 'editspot'){
+    view = {name:'spotEdit', isNew:false, draft:Object.assign({}, spotById(id))};
+    return render();
+  }
+  if(act === 'savespot'){
+    const d = view.draft;
+    if(!d.name.trim()){ alert('やることを書いてください'); return; }
+    d.minutes = Math.max(0, Number(d.minutes) || 0);
+    d.points  = Math.max(0, Number(d.points) || 0);
+    if(!d.date) d.date = todayStr();
+    const old = spotById(d.id);
+    if(old) db.spots[db.spots.indexOf(old)] = d; else db.spots.push(d);
+    save(); return go('today');
+  }
+  if(act === 'delspot'){
+    if(!confirm('このスポット作業を消しますか？')) return;
+    db.spots = db.spots.filter(s => s.id !== view.draft.id);
+    save(); return go('today');
+  }
+  if(act === 'dospot'){
+    const s = spotById(id);
+    if(!s || s.done) return;
+    const ds = todayStr();
+    const first = !logsOn(ds).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
+    const sb = first ? Math.min(Math.max(1, streak() + 1) * 2, STREAK_BONUS_MAX) : 0;
+    s.done = true; s.doneDate = ds;
+    db.logs.push({id:'spot_' + s.id, date:ds, spotId:s.id, mode:'spot',
+                  points:s.points + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name});
+    save(); render();
+    if(sb) setTimeout(() => alert('+' + (s.points + sb) + 'pt（うち連続ボーナス +' + sb + '）'), 30);
+    return;
+  }
+  if(act === 'undospot'){
+    const s = spotById(id);
+    if(!s) return;
+    const log = db.logs.find(l => l.spotId === s.id);
+    if(log && balance() - (log.points || 0) < 0){
+      alert('取り消すと、交換ずみのごほうびのぶんだけポイントが足りなくなります。\n先に「ごほうび」の交換履歴を消してください。');
+      return;
+    }
+    s.done = false; delete s.doneDate;
+    db.logs = db.logs.filter(l => l.spotId !== s.id);
+    save(); return render();
+  }
+  if(act === 'cat'){ view.draft.cat = b.dataset.c; return render(); }
+
   // ごほうび
   if(act === 'newreward'){
     view = {name:'rewardEdit', isNew:true, draft:{id:uid(), name:'', cost:100}};
@@ -931,19 +1153,19 @@ document.getElementById('app').addEventListener('click', ev => {
   // 種目編集
   if(act === 'newex'){
     view = {name:'exEdit', isNew:true,
-            draft:{id:uid(), name:'', unit:'回', amount:10, color:'orange', points:10}};
+            draft:{id:uid(), name:'', unit:'回', amount:10, cat:'other', points:10, minutes:5}};
     return render();
   }
   if(act === 'editex'){
     view = {name:'exEdit', isNew:false, draft:Object.assign({}, exById(id))};
     return render();
   }
-  if(act === 'color'){ view.draft.color = b.dataset.c; return render(); }
   if(act === 'saveex'){
     const d = view.draft;
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
-    d.amount = Number(d.amount) || 0;
-    d.points = Math.max(0, Number(d.points) || 0);
+    d.amount  = Number(d.amount) || 0;
+    d.points  = Math.max(0, Number(d.points) || 0);
+    d.minutes = Math.max(0, Number(d.minutes) || 0);
     const old = exById(d.id);
     if(old) db.exercises[db.exercises.indexOf(old)] = d; else db.exercises.push(d);
     save(); return go('exercises');
