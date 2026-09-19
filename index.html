@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e0672f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="マイメニュー">
+<title>マイメニュー</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#f5f4f1; --card:#fff; --text:#1c1c1e; --muted:#8a8a8e; --line:#e6e4de;
+  --accent:#e0672f; --soft:#fbeee7; --ok:#4c9a5a; --shadow:0 1px 2px rgba(0,0,0,.06);
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#141416;--card:#1e1e21;--text:#f2f2f0;--muted:#8e8e93;--line:#2d2d31;
+        --accent:#f08050;--soft:#2c1f19;--shadow:none}
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+body{padding-bottom:84px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 8px}
+
+.head{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 14px}
+.head .date{font-size:22px;font-weight:700;letter-spacing:.02em}
+.head .sub{font-size:13px;color:var(--muted)}
+.streak{font-size:13px;color:var(--accent);font-weight:600;white-space:nowrap}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.card.done{opacity:.72}
+.card-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.card-top b{font-size:17px}
+.tag{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
+.tag.ok{color:var(--ok);font-weight:600}
+.items{font-size:13px;color:var(--muted);margin-bottom:12px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.btns{display:flex;gap:8px}
+.btns button{flex:1;padding:11px 6px;border-radius:10px;background:var(--bg);
+  border:1px solid var(--line);font-size:14px;font-weight:600}
+.btns button.primary{background:var(--accent);color:#fff;border-color:transparent;flex:1.6}
+.btns button.ghost{flex:.8;color:var(--muted);font-weight:500}
+
+h2{font-size:14px;color:var(--muted);font-weight:600;margin:22px 2px 10px;letter-spacing:.04em}
+.empty{text-align:center;color:var(--muted);font-size:14px;padding:28px 10px;line-height:1.9}
+.row{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px;width:100%;text-align:left}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.row .name{font-weight:600}
+.row .meta{font-size:12px;color:var(--muted)}
+.row .go{margin-left:auto;color:var(--muted);font-size:20px;line-height:1}
+.addbtn{width:100%;padding:13px;border:1px dashed var(--line);border-radius:12px;
+  color:var(--muted);font-weight:600;background:none;margin-top:4px}
+.praise{background:var(--soft);border-radius:14px;padding:18px;text-align:center;
+  font-weight:600;color:var(--accent);margin-bottom:12px}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin:0 2px 5px;font-weight:600}
+.field input,.field select{width:100%;padding:12px;border:1px solid var(--line);
+  border-radius:10px;background:var(--card)}
+.field .inline{display:flex;gap:8px}
+.days{display:flex;gap:4px}
+.days button{flex:1;min-width:0;padding:10px 0;border-radius:9px;border:1px solid var(--line);
+  background:var(--card);font-size:14px}
+.days button.on{background:var(--accent);color:#fff;border-color:transparent;font-weight:700}
+.swatches{display:flex;gap:8px}
+.swatches button{width:34px;height:34px;border-radius:50%;border:2px solid transparent}
+.swatches button.on{border-color:var(--text)}
+.mitem{background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.mitem .mhead{display:flex;align-items:center;gap:8px}
+.mitem .grow{flex:1;min-width:0}
+.mitem .nm{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mitem .mrow{display:flex;gap:8px;margin-top:8px}
+.mitem input{width:100%;padding:8px 4px;text-align:center;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);font-size:15px}
+.mitem .lbl{font-size:11px;color:var(--muted)}
+.mitem .col{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0}
+.iconbtn{width:32px;height:32px;border-radius:8px;color:var(--muted);font-size:16px;flex:none}
+.bar{display:flex;gap:8px;margin:18px 0 8px}
+.bar button{flex:1;padding:14px;border-radius:12px;font-weight:700;border:1px solid var(--line);
+  background:var(--card)}
+.bar button.primary{background:var(--accent);color:#fff;border-color:transparent}
+.bar button.danger{color:#c0392b;flex:.6;font-weight:600}
+.back{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:15px;
+  font-weight:600;padding:4px 2px;margin-bottom:8px}
+
+#tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);
+  border-top:1px solid var(--line);padding:6px 0 max(6px,env(safe-area-inset-bottom))}
+#tabs button{flex:1;padding:6px 0;font-size:11px;color:var(--muted);display:flex;
+  flex-direction:column;align-items:center;gap:3px}
+#tabs button .ic{font-size:19px;line-height:1}
+#tabs button.on{color:var(--accent);font-weight:700}
+
+body.running{padding-bottom:0}
+body.running #tabs{display:none}
+#run{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
+  padding:max(12px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+.rtop{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted)}
+.rtop .stop{font-weight:600}
+.rtop .mid{margin-left:auto;font-variant-numeric:tabular-nums}
+.rbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:6px}
+.rbody .nm{font-size:26px;font-weight:700}
+.rbody .amt{font-size:64px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.rbody .amt small{font-size:24px;font-weight:600;color:var(--muted);margin-left:6px}
+.rbody .set{font-size:15px;color:var(--muted)}
+.rbody .rest{font-size:15px;color:var(--accent);font-weight:700;letter-spacing:.1em}
+.rbody .cd{font-size:80px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.rbtns{display:flex;flex-direction:column;gap:10px}
+.rbtns button{padding:18px;border-radius:14px;font-size:17px;font-weight:700;
+  background:var(--card);border:1px solid var(--line)}
+.rbtns button.primary{background:var(--accent);color:#fff;border-color:transparent;font-size:19px}
+.rbtns .side{display:flex;gap:10px}
+.rbtns .side button{flex:1;font-size:15px;font-weight:600;color:var(--muted);padding:14px}
+.prog{height:4px;background:var(--line);border-radius:2px;margin:10px 0 0;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--accent);transition:width .25s}
+
+.ptpill{display:inline-flex;align-items:center;gap:4px;background:var(--soft);color:var(--accent);
+  font-weight:800;font-size:13px;padding:4px 11px;border-radius:999px;white-space:nowrap}
+.headright{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.gain{font-size:54px;font-weight:800;color:var(--accent);line-height:1.1}
+.gain small{font-size:22px;margin-left:4px}
+.bd{margin-top:10px;font-size:14px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+.bd div{display:flex;justify-content:center;gap:10px}
+.bd b{color:var(--text);font-variant-numeric:tabular-nums}
+.lvwrap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+.lvtop{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.lvtop .lv{font-size:19px;font-weight:800}
+.lvtop .bal{margin-left:auto;font-size:13px;color:var(--muted)}
+.lvbar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.lvbar i{display:block;height:100%;background:var(--accent)}
+.rw{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.rw .grow{flex:1;min-width:0}
+.rw .nm{font-weight:600}
+.rw .cost{font-size:12px;color:var(--muted)}
+.rw button.get{padding:9px 14px;border-radius:10px;background:var(--accent);color:#fff;
+  font-weight:700;font-size:14px;flex:none}
+.rw button.get:disabled{background:var(--line);color:var(--muted);font-weight:600}
+.big{display:flex;gap:10px;margin-bottom:6px}
+.big div{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:14px;text-align:center}
+.big .n{font-size:26px;font-weight:800;line-height:1.2}
+.big .l{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap}
+.heat{display:flex;gap:3px;overflow-x:auto;padding:4px 2px 8px}
+.heat .wk{display:flex;flex-direction:column;gap:3px}
+.heat .c{width:13px;height:13px;border-radius:3px;background:var(--line)}
+.heat .c.l1{background:var(--accent);opacity:.35}
+.heat .c.l2{background:var(--accent);opacity:.65}
+.heat .c.l3{background:var(--accent)}
+.heat .c.rest{background:var(--muted);opacity:.3}
+.heat .c.future{background:transparent}
+.legend{font-size:11px;color:var(--muted);display:flex;gap:12px;margin:0 2px 4px}
+.legend span{display:flex;align-items:center;gap:4px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav id="tabs">
+  <button data-tab="today"><span class="ic">☀</span>今日</button>
+  <button data-tab="menus"><span class="ic">☰</span>メニュー</button>
+  <button data-tab="exercises"><span class="ic">◎</span>種目</button>
+  <button data-tab="rewards"><span class="ic">★</span>ごほうび</button>
+  <button data-tab="records"><span class="ic">▦</span>記録</button>
+</nav>
+<script>
+'use strict';
+
+/* ========== 基本 ========== */
+const KEY = 'myroutine.v1';
+const BUILD = '0.2';   // スマホで見てもらうとき、どの版かが分かるように
+const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
+const DAYS = ['日','月','火','水','木','金','土'];
+const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
+                purple:'#7a5ea1', pink:'#c2566f', gray:'#7b7b80'};
+const MINI_RATE = 0.3;
+
+const uid = () => Math.random().toString(36).slice(2,9);
+const pad = n => String(n).padStart(2,'0');
+const fmtDate = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const parseDate = s => { const a = s.split('-').map(Number); return new Date(a[0], a[1]-1, a[2]); };
+const todayStr = () => fmtDate(new Date());
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const addDays = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+const miniAmount = a => a > 0 ? Math.max(1, Math.round(a * MINI_RATE)) : 0;
+
+/* ========== データ ========== */
+let db = load();
+let view = {name:'today'};
+let run = null;
+
+function seed(){
+  const ex = (name,unit,amount,color,points) => ({id:uid(), name, unit, amount, color, points});
+  const stretch = ex('ストレッチ','チェック',0,'green',5);
+  const squat   = ex('スクワット','回',30,'orange',10);
+  const pushup  = ex('腕立て伏せ','回',20,'orange',10);
+  const plank   = ex('プランク','秒',60,'purple',10);
+  const words   = ex('英単語','個',20,'blue',15);
+  const read    = ex('読書','分',15,'pink',10);
+  return {
+    exercises:[stretch,squat,pushup,plank,words,read],
+    menus:[
+      {id:uid(), name:'朝メニュー', days:[0,1,2,3,4,5,6], time:'07:00', items:[
+        {exerciseId:stretch.id, amount:0,  sets:1, rest:0},
+        {exerciseId:squat.id,   amount:30, sets:1, rest:0},
+        {exerciseId:read.id,    amount:15, sets:1, rest:0}]},
+      {id:uid(), name:'筋トレの日', days:[1,3,5], time:'19:00', items:[
+        {exerciseId:pushup.id, amount:20, sets:3, rest:60},
+        {exerciseId:squat.id,  amount:30, sets:2, rest:60},
+        {exerciseId:plank.id,  amount:60, sets:1, rest:0}]},
+      {id:uid(), name:'夜の勉強', days:[0,1,2,3,4,5,6], time:'21:00', items:[
+        {exerciseId:words.id, amount:20, sets:1, rest:0}]}
+    ],
+    logs:[],
+    rewards:[
+      {id:uid(), name:'好きなラーメンを食べる', cost:300},
+      {id:uid(), name:'ゲーム1時間', cost:150},
+      {id:uid(), name:'マンガを1冊買う', cost:200}
+    ],
+    redemptions:[]
+  };
+}
+function load(){
+  let d = null;
+  try { const s = localStorage.getItem(KEY); if(s) d = JSON.parse(s); } catch(e){}
+  if(!d) return seed();
+  // 古いデータをポイント対応にする
+  if(!d.rewards) d.rewards = [];
+  if(!d.redemptions) d.redemptions = [];
+  d.exercises.forEach(e => { if(typeof e.points !== 'number') e.points = 10; });
+  d.logs.forEach(l => {
+    if(typeof l.points === 'number') return;
+    if(l.mode === 'rest' || !l.entries){ l.points = 0; return; }
+    let p = 0, all = true;
+    l.entries.forEach(en => {
+      const e = d.exercises.find(x => x.id === en.exerciseId);
+      if(!en.done){ all = false; return; }
+      const base = e ? e.points : 10;
+      p += l.mode === 'mini' ? Math.ceil(base / 2) : base;
+    });
+    if(all && l.entries.length) p += l.mode === 'mini' ? 5 : 10;
+    l.points = p;
+  });
+  return d;
+}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(db)); } catch(e){} }
+
+const exById   = id => db.exercises.find(e => e.id === id);
+const menuById = id => db.menus.find(m => m.id === id);
+const menusOn  = date => db.menus.filter(m => m.days.includes(date.getDay()));
+const logsOn   = ds => db.logs.filter(l => l.date === ds);
+const logFor   = (ds, menuId) => db.logs.find(l => l.date === ds && l.menuId === menuId);
+
+function amountText(amount, unit){
+  if(unit === 'チェック') return '';
+  return amount + unit;
+}
+function itemText(it){
+  const e = exById(it.exerciseId);
+  if(!e) return '';
+  let s = e.name;
+  const a = amountText(it.amount, e.unit);
+  if(a) s += ' ' + a;
+  if(it.sets > 1) s += '×' + it.sets;
+  return s;
+}
+
+/* ========== ポイント ==========
+   種目を1つ終えるたびに、その種目のポイント。
+   ぜんぶ終えたら完了ボーナス。その日の最初の1本に連続ボーナス。
+   ミニ版は半分（切り上げ）。                                        */
+const COMPLETE_BONUS = 10;
+const STREAK_BONUS_MAX = 30;
+
+function earned(){ return db.logs.reduce((s,l) => s + (l.points || 0), 0); }
+function spent(){ return db.redemptions.reduce((s,r) => s + r.cost, 0); }
+function balance(){ return earned() - spent(); }
+function level(){ return Math.floor(earned() / 100) + 1; }
+function levelRest(){ return 100 - (earned() % 100); }
+function ptOn(ds){ return logsOn(ds).reduce((s,l) => s + (l.points || 0), 0); }
+function menuPoints(m){
+  let p = 0;
+  m.items.forEach(it => { const e = exById(it.exerciseId); if(e) p += e.points; });
+  return p + (m.items.length ? COMPLETE_BONUS : 0);
+}
+
+/* 実行が終わったときの内訳を作る */
+function runPoints(){
+  const half = n => Math.ceil(n / 2);
+  const mini = run.mode === 'mini';
+  const items = [];
+  let base = 0;
+  run.queue.filter(q => q.done).forEach(q => {
+    const e = exById(q.exerciseId);
+    const p = mini ? half(e ? e.points : 10) : (e ? e.points : 10);
+    base += p;
+    items.push({name:q.name, p});
+  });
+  const all = run.queue.every(q => q.done);
+  const bonus = all ? (mini ? half(COMPLETE_BONUS) : COMPLETE_BONUS) : 0;
+  // その日ぜんぶで最初の完了なら連続ボーナス
+  const first = !logsOn(todayStr()).some(l => l.mode === 'full' || l.mode === 'mini');
+  const st = first ? Math.max(1, streak() + 1) : 0;   // まだ保存前なので今日のぶんを足す
+  const sb = first ? Math.min(st * 2, STREAK_BONUS_MAX) : 0;
+  return {items, base, bonus, streakDays:st, streakBonus:sb, total:base + bonus + sb};
+}
+
+/* ========== ストリーク ========== */
+function streak(){
+  let n = 0, d = new Date();
+  for(let i = 0; i < 400; i++){
+    const ds = fmtDate(d);
+    const ls = logsOn(ds);
+    const did  = ls.some(l => l.mode === 'full' || l.mode === 'mini');
+    const rest = ls.some(l => l.mode === 'rest');
+    const sched = menusOn(d).length > 0;
+    if(did) n++;
+    else if(rest || !sched){ /* 休んだ日と予定のない日は切らない */ }
+    else if(i > 0) break;          // 今日はまだ途中なので切らない
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
+/* ========== 画面：今日 ========== */
+function viewToday(){
+  const now = new Date(), ds = todayStr();
+  const list = menusOn(now).slice().sort((a,b) => (a.time||'').localeCompare(b.time||''));
+  const others = db.menus.filter(m => !list.includes(m));
+  const st = streak();
+  const allDone = list.length > 0 && list.every(m => logFor(ds, m.id));
+
+  let h = '<div class="wrap"><div class="head"><div>' +
+    '<div class="date">' + (now.getMonth()+1) + '月' + now.getDate() + '日(' + DAYS[now.getDay()] + ')</div>' +
+    '<div class="sub">' + (list.length ? '今日は ' + list.length + ' メニュー' : '今日は予定なし') + '</div>' +
+    '</div><div class="headright">' +
+    '<div class="ptpill">★ ' + balance() + ' pt</div>' +
+    (st > 0 ? '<div class="streak">🔥 ' + st + '日つづいている</div>' : '') +
+    (ptOn(ds) ? '<div class="sub">きょう +' + ptOn(ds) + '</div>' : '') +
+    '</div></div>';
+
+  if(allDone) h += '<div class="praise">今日の分、ぜんぶ終わりました 🎉</div>';
+
+  if(!list.length && !others.length){
+    h += '<div class="empty">メニューがまだありません。<br>下の「メニュー」から作ってください。</div>';
+  }
+  list.forEach(m => { h += menuCard(m, ds); });
+
+  if(others.length){
+    h += '<h2>ほかのメニュー</h2>';
+    others.forEach(m => { h += menuCard(m, ds, true); });
+  }
+  return h + '</div>';
+}
+
+function menuCard(m, ds, other){
+  const log = logFor(ds, m.id);
+  const desc = m.items.map(itemText).filter(Boolean).join('・') || '種目が入っていません';
+  let h = '<div class="card' + (log ? ' done' : '') + '">' +
+    '<div class="card-top"><b>' + esc(m.name) + '</b>' +
+    '<span class="tag' + (log && log.mode !== 'rest' ? ' ok' : '') + '">' +
+      (log ? (log.mode === 'rest' ? '休んだ'
+              : (log.mode === 'mini' ? '✓ ミニ版' : '✓ 完了') + (log.points ? ' +' + log.points + 'pt' : ''))
+           : (other ? '' : m.time || '')) +
+    '</span></div>' +
+    '<div class="items">' + esc(desc) + '</div>' +
+    (!log && m.items.length ? '<div class="items" style="margin-bottom:10px">やりきると <b style="color:var(--accent)">+' +
+      menuPoints(m) + 'pt</b></div>' : '') +
+    '<div class="btns">';
+  if(log){
+    h += '<button data-act="undo" data-id="' + m.id + '">取り消す</button>' +
+         '<button class="ghost" data-act="start" data-id="' + m.id + '">もう一度</button>';
+  } else if(!m.items.length){
+    h += '<button data-act="editmenu" data-id="' + m.id + '">種目を入れる</button>';
+  } else {
+    h += '<button class="primary" data-act="start" data-id="' + m.id + '">はじめる</button>' +
+         '<button data-act="startmini" data-id="' + m.id + '">ミニ版</button>' +
+         (other ? '' : '<button class="ghost" data-act="rest" data-id="' + m.id + '">休む</button>');
+  }
+  return h + '</div></div>';
+}
+
+/* ========== 画面：メニュー ========== */
+function viewMenus(){
+  let h = '<div class="wrap"><div class="head"><div class="date">メニュー</div></div>';
+  if(!db.menus.length) h += '<div class="empty">メニューがありません。</div>';
+  db.menus.forEach(m => {
+    const days = m.days.length === 7 ? '毎日' : m.days.slice().sort().map(d => DAYS[d]).join('・');
+    h += '<button class="row" data-act="editmenu" data-id="' + m.id + '">' +
+      '<div><div class="name">' + esc(m.name) + '</div>' +
+      '<div class="meta">' + days + ' ' + (m.time || '') + ' ・ ' + m.items.length + '種目</div></div>' +
+      '<span class="go">›</span></button>';
+  });
+  return h + '<button class="addbtn" data-act="newmenu">＋ メニューを作る</button></div>';
+}
+
+function viewMenuEdit(){
+  const m = view.draft;
+  let h = '<div class="wrap"><button class="back" data-act="tab" data-tab="menus">‹ メニュー</button>' +
+    '<div class="field"><label>名前</label>' +
+    '<input data-field="name" value="' + esc(m.name) + '" placeholder="朝メニュー"></div>' +
+    '<div class="field"><label>やる曜日</label><div class="days">';
+  DAYS.forEach((d,i) => {
+    h += '<button class="' + (m.days.includes(i) ? 'on' : '') + '" data-act="day" data-i="' + i + '">' + d + '</button>';
+  });
+  h += '</div></div><div class="field"><label>時刻（めやす）</label>' +
+    '<input type="time" data-field="time" value="' + esc(m.time || '') + '"></div>' +
+    '<h2>種目</h2>';
+
+  if(!m.items.length) h += '<div class="empty">まだ空です。下から種目を足してください。</div>';
+  m.items.forEach((it,i) => {
+    const e = exById(it.exerciseId);
+    if(!e) return;
+    h += '<div class="mitem"><div class="mhead">' +
+      '<span class="dot" style="background:' + (COLORS[e.color] || COLORS.gray) + '"></span>' +
+      '<div class="grow"><div class="nm">' + esc(e.name) + '</div></div>' +
+      '<button class="iconbtn" data-act="itemup" data-i="' + i + '">↑</button>' +
+      '<button class="iconbtn" data-act="itemdel" data-i="' + i + '">✕</button></div>' +
+      '<div class="mrow">';
+    if(e.unit !== 'チェック'){
+      h += '<div class="col"><input inputmode="numeric" data-item="' + i + '" data-key="amount" value="' + it.amount + '">' +
+           '<span class="lbl">' + e.unit + '</span></div>';
+    }
+    h += '<div class="col"><input inputmode="numeric" data-item="' + i + '" data-key="sets" value="' + it.sets + '">' +
+         '<span class="lbl">セット</span></div>' +
+         '<div class="col"><input inputmode="numeric" data-item="' + i + '" data-key="rest" value="' + it.rest + '">' +
+         '<span class="lbl">休憩の秒数</span></div></div></div>';
+  });
+
+  h += '<div class="field" style="margin-top:10px"><select data-act="additem"><option value="">＋ 種目を足す</option>';
+  db.exercises.forEach(e => { h += '<option value="' + e.id + '">' + esc(e.name) + '</option>'; });
+  h += '</select></div><div class="bar">' +
+    '<button class="primary" data-act="savemenu">保存する</button>' +
+    (view.isNew ? '' : '<button class="danger" data-act="delmenu">削除</button>') +
+    '</div></div>';
+  return h;
+}
+
+/* ========== 画面：種目 ========== */
+function viewExercises(){
+  let h = '<div class="wrap"><div class="head"><div class="date">種目</div></div>' +
+    '<div class="sub" style="color:var(--muted);font-size:13px;margin:0 2px 12px">' +
+    'メニューに入れる部品です。同じ種目を複数のメニューで使えます。</div>';
+  db.exercises.forEach(e => {
+    const used = db.menus.filter(m => m.items.some(it => it.exerciseId === e.id)).length;
+    h += '<button class="row" data-act="editex" data-id="' + e.id + '">' +
+      '<span class="dot" style="background:' + (COLORS[e.color] || COLORS.gray) + '"></span>' +
+      '<div><div class="name">' + esc(e.name) + '</div>' +
+      '<div class="meta">' + (amountText(e.amount, e.unit) || 'チェックするだけ') +
+      ' ・ ' + e.points + 'pt' + (used ? ' ・ ' + used + 'メニューで使用' : '') + '</div></div>' +
+      '<span class="go">›</span></button>';
+  });
+  return h + '<button class="addbtn" data-act="newex">＋ 種目を作る</button></div>';
+}
+
+function viewExEdit(){
+  const e = view.draft;
+  let h = '<div class="wrap"><button class="back" data-act="tab" data-tab="exercises">‹ 種目</button>' +
+    '<div class="field"><label>名前</label>' +
+    '<input data-field="name" value="' + esc(e.name) + '" placeholder="腕立て伏せ"></div>' +
+    '<div class="field"><div class="inline">' +
+    '<div style="flex:1"><label>単位</label><select data-field="unit">';
+  UNITS.forEach(u => { h += '<option value="' + u + '"' + (e.unit === u ? ' selected' : '') + '>' + u + '</option>'; });
+  h += '</select></div><div style="flex:1"><label>ふだんの量</label>' +
+    '<input inputmode="numeric" data-field="amount" value="' + e.amount + '"' +
+    (e.unit === 'チェック' ? ' disabled' : '') + '></div></div></div>' +
+    '<div class="field"><label>もらえるポイント</label>' +
+    '<input inputmode="numeric" data-field="points" value="' + e.points + '">' +
+    '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
+    'この種目を1つ終えるたびに入るポイント。きつい種目ほど高くすると続けやすい。</div></div>' +
+    '<div class="field"><label>色</label><div class="swatches">';
+  Object.keys(COLORS).forEach(c => {
+    h += '<button class="' + (e.color === c ? 'on' : '') + '" data-act="color" data-c="' + c +
+         '" style="background:' + COLORS[c] + '"></button>';
+  });
+  h += '</div></div><div class="bar">' +
+    '<button class="primary" data-act="saveex">保存する</button>' +
+    (view.isNew ? '' : '<button class="danger" data-act="delex">削除</button>') +
+    '</div></div>';
+  return h;
+}
+
+/* ========== 画面：ごほうび ========== */
+function viewRewards(){
+  const bal = earned(), rest = levelRest();
+  let h = '<div class="wrap"><div class="head"><div class="date">ごほうび</div>' +
+    '<div class="ptpill">★ ' + balance() + ' pt</div></div>' +
+    '<div class="lvwrap"><div class="lvtop"><span class="lv">レベル ' + level() + '</span>' +
+    '<span class="bal">あと ' + rest + 'pt で レベル ' + (level() + 1) + '</span></div>' +
+    '<div class="lvbar"><i style="width:' + (100 - rest) + '%"></i></div></div>';
+
+  if(!db.rewards.length){
+    h += '<div class="empty">ごほうびがありません。<br>自分がうれしいものを決めてください。</div>';
+  }
+  db.rewards.forEach(r => {
+    const can = balance() >= r.cost;
+    h += '<div class="rw"><button class="grow" data-act="editreward" data-id="' + r.id + '" style="text-align:left">' +
+      '<div class="nm">' + esc(r.name) + '</div>' +
+      '<div class="cost">' + r.cost + 'pt' + (can ? '' : ' ・ あと ' + (r.cost - balance()) + 'pt') + '</div></button>' +
+      '<button class="get" data-act="redeem" data-id="' + r.id + '"' + (can ? '' : ' disabled') + '>' +
+      (can ? '交換する' : 'まだ') + '</button></div>';
+  });
+  h += '<button class="addbtn" data-act="newreward">＋ ごほうびを作る</button>';
+
+  if(db.redemptions.length){
+    h += '<h2>交換したもの</h2>';
+    db.redemptions.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0, 10).forEach(r => {
+      const d = parseDate(r.date);
+      h += '<div class="row"><div><div class="name">' + esc(r.name) + '</div>' +
+        '<div class="meta">' + (d.getMonth()+1) + '/' + d.getDate() + ' ・ ' + r.cost + 'pt つかった</div></div>' +
+        '<button class="iconbtn" data-act="delredeem" data-id="' + r.id + '" style="margin-left:auto">✕</button></div>';
+    });
+  }
+  h += '<h2>ポイントのつきかた</h2><div class="card" style="font-size:13px;color:var(--muted);line-height:2">' +
+    '種目を1つ終える … その種目のポイント<br>' +
+    'メニューをやりきる … ＋' + COMPLETE_BONUS + 'pt<br>' +
+    'その日の1本目 … 連続日数×2pt（最大' + STREAK_BONUS_MAX + 'pt）<br>' +
+    'ミニ版 … 半分（切り上げ）<br>' +
+    'これまでの合計 ' + bal + 'pt ・ つかった ' + spent() + 'pt</div>' +
+    '<div style="text-align:center;font-size:11px;color:var(--muted);margin:18px 0 4px">' +
+    'マイメニュー v' + BUILD + '</div>';
+  return h + '</div>';
+}
+
+function viewRewardEdit(){
+  const r = view.draft;
+  let h = '<div class="wrap"><button class="back" data-act="tab" data-tab="rewards">‹ ごほうび</button>' +
+    '<div class="field"><label>ごほうび</label>' +
+    '<input data-field="name" value="' + esc(r.name) + '" placeholder="好きなラーメンを食べる"></div>' +
+    '<div class="field"><label>必要なポイント</label>' +
+    '<input inputmode="numeric" data-field="cost" value="' + r.cost + '"></div>' +
+    '<div class="bar"><button class="primary" data-act="savereward">保存する</button>' +
+    (view.isNew ? '' : '<button class="danger" data-act="delreward">削除</button>') +
+    '</div></div>';
+  return h;
+}
+
+/* ========== 画面：記録 ========== */
+function viewRecords(){
+  const st = streak();
+  const done = db.logs.filter(l => l.mode !== 'rest');
+  // 今週（日曜はじまり）
+  const now = new Date();
+  const weekStart = addDays(now, -now.getDay());
+  let wDone = 0, wPlan = 0;
+  for(let i = 0; i <= now.getDay(); i++){
+    const d = addDays(weekStart, i);
+    wPlan += menusOn(d).length;
+    wDone += logsOn(fmtDate(d)).filter(l => l.mode !== 'rest').length;
+  }
+  let wPt = 0;
+  for(let i = 0; i <= now.getDay(); i++) wPt += ptOn(fmtDate(addDays(weekStart, i)));
+
+  let h = '<div class="wrap"><div class="head"><div class="date">記録</div>' +
+    '<div class="ptpill">★ ' + balance() + ' pt</div></div>' +
+    '<div class="big"><div><div class="n">' + st + '</div><div class="l">連続日数</div></div>' +
+    '<div><div class="n">' + wDone + '/' + wPlan + '</div><div class="l">今週の回数</div></div>' +
+    '<div><div class="n">' + wPt + '</div><div class="l">今週のpt</div></div></div>' +
+    '<div class="big"><div><div class="n">' + level() + '</div><div class="l">レベル</div></div>' +
+    '<div><div class="n">' + earned() + '</div><div class="l">ためたpt</div></div>' +
+    '<div><div class="n">' + done.length + '</div><div class="l">通算の回数</div></div></div>';
+
+  // 草カレンダー（18週）
+  const weeks = 18;
+  const end = addDays(now, 6 - now.getDay());
+  const start = addDays(end, -(weeks * 7 - 1));
+  h += '<h2>つみかさね</h2><div class="heat">';
+  for(let w = 0; w < weeks; w++){
+    h += '<div class="wk">';
+    for(let dow = 0; dow < 7; dow++){
+      const d = addDays(start, w * 7 + dow);
+      const ds = fmtDate(d);
+      let cls = 'c';
+      if(d > now) cls += ' future';
+      else {
+        const ls = logsOn(ds);
+        const full = ls.filter(l => l.mode === 'full').length;
+        const mini = ls.filter(l => l.mode === 'mini').length;
+        if(full + mini >= 2) cls += ' l3';
+        else if(full) cls += ' l2';
+        else if(mini) cls += ' l1';
+        else if(ls.some(l => l.mode === 'rest')) cls += ' rest';
+      }
+      h += '<div class="' + cls + '" title="' + ds + '"></div>';
+    }
+    h += '</div>';
+  }
+  h += '</div><div class="legend"><span><i class="c l1" style="background:var(--accent);opacity:.35"></i>ミニ版</span>' +
+    '<span><i style="background:var(--accent)"></i>完了</span>' +
+    '<span><i style="background:var(--muted);opacity:.3"></i>休んだ</span></div>';
+
+  // 直近30日の種目ごとの合計
+  const from = fmtDate(addDays(now, -29));
+  const tot = {};
+  db.logs.filter(l => l.date >= from && l.entries).forEach(l => {
+    l.entries.filter(en => en.done).forEach(en => {
+      const e = exById(en.exerciseId);
+      if(!e) return;
+      if(!tot[e.id]) tot[e.id] = {e, amount:0, times:0};
+      tot[e.id].amount += en.amount || 0;
+      tot[e.id].times++;
+    });
+  });
+  const rows = Object.values(tot).sort((a,b) => b.times - a.times);
+  h += '<h2>この30日の合計</h2>';
+  if(!rows.length) h += '<div class="empty">まだ記録がありません。</div>';
+  rows.forEach(r => {
+    h += '<div class="row"><span class="dot" style="background:' + (COLORS[r.e.color] || COLORS.gray) + '"></span>' +
+      '<div><div class="name">' + esc(r.e.name) + '</div>' +
+      '<div class="meta">' + r.times + '回やった' +
+      (r.e.unit !== 'チェック' ? ' ・ 合計 ' + r.amount + r.e.unit : '') + '</div></div></div>';
+  });
+
+  // 最近の記録
+  const recent = db.logs.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0, 12);
+  if(recent.length){
+    h += '<h2>最近</h2>';
+    recent.forEach(l => {
+      const m = menuById(l.menuId);
+      const d = parseDate(l.date);
+      h += '<div class="row"><div><div class="name">' + ((d.getMonth()+1) + '/' + d.getDate() + ' ' +
+        esc(m ? m.name : 'メニュー')) + '</div><div class="meta">' +
+        (l.mode === 'rest' ? '休んだ' : l.mode === 'mini' ? 'ミニ版' : '完了') +
+        (l.points ? ' ・ +' + l.points + 'pt' : '') +
+        (l.durationSec ? ' ・ ' + Math.round(l.durationSec / 60) + '分' : '') + '</div></div>' +
+        '<button class="iconbtn" data-act="dellog" data-id="' + l.id + '" style="margin-left:auto">✕</button></div>';
+    });
+  }
+  return h + '</div>';
+}
+
+/* ========== 実行モード ========== */
+function startRun(menuId, mode){
+  const m = menuById(menuId);
+  if(!m || !m.items.length) return;
+  const queue = [];
+  m.items.forEach(it => {
+    const e = exById(it.exerciseId);
+    if(!e) return;
+    const amount = mode === 'mini' ? miniAmount(it.amount) : it.amount;
+    const sets = mode === 'mini' ? 1 : Math.max(1, it.sets);
+    queue.push({exerciseId:e.id, name:e.name, unit:e.unit, amount, sets, rest:it.rest || 0,
+                setDone:0, done:false});
+  });
+  if(!queue.length) return;
+  run = {menuId, mode, queue, idx:0, startedAt:Date.now(), resting:false, restLeft:0,
+         timer:null, finished:false};
+  document.body.classList.add('running');
+  render();
+  run.timer = setInterval(tick, 1000);
+}
+function stopRun(){
+  if(run && run.timer) clearInterval(run.timer);
+  run = null;
+  document.body.classList.remove('running');
+  view = {name:'today'};
+  render();
+}
+function tick(){
+  if(!run) return;
+  if(run.resting){
+    run.restLeft--;
+    if(run.restLeft <= 0){ run.resting = false; beep(); }
+    render();
+  } else if(!run.finished){
+    const el = document.getElementById('elapsed');
+    if(el) el.textContent = mmss(Math.floor((Date.now() - run.startedAt) / 1000));
+  }
+}
+function mmss(s){ return pad(Math.floor(s / 60)) + ':' + pad(s % 60); }
+function beep(){
+  try {
+    const C = window.AudioContext || window.webkitAudioContext;
+    if(!C) return;
+    const ctx = new C(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(.18, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .4);
+    o.start(); o.stop(ctx.currentTime + .4);
+  } catch(e){}
+}
+function doneSet(){
+  const it = run.queue[run.idx];
+  it.setDone++;
+  if(it.setDone >= it.sets){
+    it.done = true;
+    if(run.idx >= run.queue.length - 1){ finishRun(); return; }
+    run.idx++;
+    if(it.rest > 0){ run.resting = true; run.restLeft = it.rest; }
+  } else if(it.rest > 0){
+    run.resting = true; run.restLeft = it.rest;
+  }
+  render();
+}
+function skipItem(){
+  if(run.idx >= run.queue.length - 1){ finishRun(); return; }
+  run.idx++; run.resting = false;
+  render();
+}
+function finishRun(){
+  if(run.timer) clearInterval(run.timer);
+  run.timer = null;
+  run.finished = true;
+  run.durationSec = Math.floor((Date.now() - run.startedAt) / 1000);
+  const ds = todayStr();
+  const old = logFor(ds, run.menuId);
+  if(old) db.logs = db.logs.filter(l => l !== old);
+  run.gain = runPoints();            // 保存する前に数える（連続ボーナスの判定に要る）
+  db.logs.push({
+    id: ds + '_' + run.menuId, date: ds, menuId: run.menuId, mode: run.mode,
+    durationSec: run.durationSec, points: run.gain.total,
+    entries: run.queue.map(q => ({exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0),
+                                 done:q.done}))
+  });
+  save();
+  render();
+}
+
+function viewRun(){
+  const q = run.queue, it = q[run.idx];
+  if(run.finished){
+    const n = q.filter(x => x.done).length, g = run.gain;
+    let bd = '<div><span>種目 ' + n + 'つ</span><b>+' + g.base + '</b></div>';
+    if(g.bonus)       bd += '<div><span>ぜんぶ完了</span><b>+' + g.bonus + '</b></div>';
+    if(g.streakBonus) bd += '<div><span>' + g.streakDays + '日れんぞく</span><b>+' + g.streakBonus + '</b></div>';
+    return '<div id="run"><div class="rtop"></div>' +
+      '<div class="rbody"><div class="nm">おつかれさま 🎉</div>' +
+      '<div class="gain">+' + g.total + '<small>pt</small></div>' +
+      '<div class="bd">' + bd + '</div>' +
+      '<div class="set" style="margin-top:14px">' + mmss(run.durationSec) + ' ・ 残高 ' + balance() + 'pt</div>' +
+      (run.mode === 'mini' ? '<div class="rest">ミニ版でも、やった日です</div>' : '') +
+      '</div><div class="rbtns"><button class="primary" data-act="closerun">とじる</button></div></div>';
+  }
+  if(run.resting){
+    return '<div id="run"><div class="rtop"><button class="stop" data-act="abort">中断</button>' +
+      '<span class="mid">つぎ：' + esc(q[run.idx].name) + '</span></div>' +
+      '<div class="rbody"><div class="rest">休憩</div>' +
+      '<div class="cd">' + run.restLeft + '</div></div>' +
+      '<div class="rbtns"><button class="primary" data-act="skiprest">つぎへ</button>' +
+      '<div class="side"><button data-act="rest10">＋10秒</button></div></div></div>';
+  }
+  const pct = Math.round((run.idx / q.length) * 100);
+  const amt = it.unit === 'チェック' ? 'やる' : it.amount;
+  const unit = it.unit === 'チェック' ? '' : '<small>' + it.unit + '</small>';
+  return '<div id="run"><div class="rtop"><button class="stop" data-act="abort">中断</button>' +
+    '<span class="mid">' + (run.idx + 1) + ' / ' + q.length + '</span>' +
+    '<span id="elapsed">' + mmss(Math.floor((Date.now() - run.startedAt) / 1000)) + '</span></div>' +
+    '<div class="prog"><i style="width:' + pct + '%"></i></div>' +
+    '<div class="rbody">' +
+    (run.mode === 'mini' ? '<div class="rest">ミニ版</div>' : '') +
+    '<div class="nm">' + esc(it.name) + '</div>' +
+    '<div class="amt">' + amt + unit + '</div>' +
+    (it.sets > 1 ? '<div class="set">セット ' + (it.setDone + 1) + ' / ' + it.sets + '</div>' : '') +
+    '</div><div class="rbtns"><button class="primary" data-act="doneset">できた</button>' +
+    '<div class="side"><button data-act="skipitem">とばす</button></div></div></div>';
+}
+
+/* ========== 描画 ========== */
+function render(){
+  const app = document.getElementById('app');
+  let h = '';
+  if(run) h = viewRun();
+  else if(view.name === 'today') h = viewToday();
+  else if(view.name === 'menus') h = viewMenus();
+  else if(view.name === 'menuEdit') h = viewMenuEdit();
+  else if(view.name === 'exercises') h = viewExercises();
+  else if(view.name === 'exEdit') h = viewExEdit();
+  else if(view.name === 'rewards') h = viewRewards();
+  else if(view.name === 'rewardEdit') h = viewRewardEdit();
+  else if(view.name === 'records') h = viewRecords();
+  app.innerHTML = h;
+  const tabName = view.name === 'menuEdit' ? 'menus' :
+                  view.name === 'exEdit' ? 'exercises' :
+                  view.name === 'rewardEdit' ? 'rewards' : view.name;
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.tab === tabName);
+  });
+}
+function go(name){ view = {name}; render(); }
+
+/* ========== 操作 ========== */
+document.getElementById('tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button');
+  if(b) go(b.dataset.tab);
+});
+
+document.getElementById('app').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-act]');
+  if(!b) return;
+  const act = b.dataset.act, id = b.dataset.id;
+
+  if(act === 'tab') return go(b.dataset.tab);
+
+  // 今日
+  if(act === 'start')      return startRun(id, 'full');
+  if(act === 'startmini')  return startRun(id, 'mini');
+  if(act === 'rest'){
+    const ds = todayStr();
+    db.logs = db.logs.filter(l => !(l.date === ds && l.menuId === id));
+    db.logs.push({id:ds + '_' + id, date:ds, menuId:id, mode:'rest'});
+    save(); return render();
+  }
+  if(act === 'undo'){
+    const ds = todayStr();
+    const log = logFor(ds, id);
+    if(log && balance() - (log.points || 0) < 0){
+      alert('取り消すと、交換ずみのごほうびのぶんだけポイントが足りなくなります。\n先に「ごほうび」の交換履歴を消してください。');
+      return;
+    }
+    db.logs = db.logs.filter(l => !(l.date === ds && l.menuId === id));
+    save(); return render();
+  }
+  if(act === 'dellog'){
+    db.logs = db.logs.filter(l => l.id !== id);
+    save(); return render();
+  }
+
+  // 実行モード
+  if(act === 'doneset')  return doneSet();
+  if(act === 'skipitem') return skipItem();
+  if(act === 'skiprest'){ run.resting = false; return render(); }
+  if(act === 'rest10'){ run.restLeft += 10; return render(); }
+  if(act === 'abort'){
+    if(confirm('中断します。ここまでの分は記録しません。')) stopRun();
+    return;
+  }
+  if(act === 'closerun') return stopRun();
+
+  // メニュー編集
+  if(act === 'newmenu'){
+    view = {name:'menuEdit', isNew:true,
+            draft:{id:uid(), name:'', days:[1,2,3,4,5], time:'07:00', items:[]}};
+    return render();
+  }
+  if(act === 'editmenu'){
+    view = {name:'menuEdit', isNew:false, draft:JSON.parse(JSON.stringify(menuById(id)))};
+    return render();
+  }
+  if(act === 'day'){
+    const i = Number(b.dataset.i), d = view.draft.days;
+    const at = d.indexOf(i);
+    if(at >= 0) d.splice(at, 1); else d.push(i);
+    return render();
+  }
+  if(act === 'itemdel'){ view.draft.items.splice(Number(b.dataset.i), 1); return render(); }
+  if(act === 'itemup'){
+    const i = Number(b.dataset.i);
+    if(i > 0){ const a = view.draft.items; [a[i-1], a[i]] = [a[i], a[i-1]]; }
+    return render();
+  }
+  if(act === 'savemenu'){
+    const d = view.draft;
+    if(!d.name.trim()){ alert('名前を入れてください'); return; }
+    if(!d.days.length){ alert('曜日を1つ以上えらんでください'); return; }
+    const old = menuById(d.id);
+    if(old) db.menus[db.menus.indexOf(old)] = d; else db.menus.push(d);
+    save(); return go('menus');
+  }
+  if(act === 'delmenu'){
+    if(!confirm('このメニューを削除します。記録は残ります。')) return;
+    db.menus = db.menus.filter(m => m.id !== view.draft.id);
+    save(); return go('menus');
+  }
+
+  // ごほうび
+  if(act === 'newreward'){
+    view = {name:'rewardEdit', isNew:true, draft:{id:uid(), name:'', cost:100}};
+    return render();
+  }
+  if(act === 'editreward'){
+    view = {name:'rewardEdit', isNew:false, draft:Object.assign({}, db.rewards.find(r => r.id === id))};
+    return render();
+  }
+  if(act === 'savereward'){
+    const d = view.draft;
+    if(!d.name.trim()){ alert('ごほうびを書いてください'); return; }
+    d.cost = Math.max(1, Number(d.cost) || 1);
+    const old = db.rewards.find(r => r.id === d.id);
+    if(old) db.rewards[db.rewards.indexOf(old)] = d; else db.rewards.push(d);
+    save(); return go('rewards');
+  }
+  if(act === 'delreward'){
+    if(!confirm('このごほうびを消しますか？')) return;
+    db.rewards = db.rewards.filter(r => r.id !== view.draft.id);
+    save(); return go('rewards');
+  }
+  if(act === 'redeem'){
+    const r = db.rewards.find(x => x.id === id);
+    if(!r || balance() < r.cost) return;
+    if(!confirm(r.name + '\n' + r.cost + 'pt つかいます。交換しますか？')) return;
+    db.redemptions.push({id:uid(), date:todayStr(), rewardId:r.id, name:r.name, cost:r.cost});
+    save(); render();
+    alert('交換しました。たっぷり楽しんでください。');
+    return;
+  }
+  if(act === 'delredeem'){
+    if(!confirm('この交換を取り消して、ポイントを戻しますか？')) return;
+    db.redemptions = db.redemptions.filter(r => r.id !== id);
+    save(); return render();
+  }
+
+  // 種目編集
+  if(act === 'newex'){
+    view = {name:'exEdit', isNew:true,
+            draft:{id:uid(), name:'', unit:'回', amount:10, color:'orange', points:10}};
+    return render();
+  }
+  if(act === 'editex'){
+    view = {name:'exEdit', isNew:false, draft:Object.assign({}, exById(id))};
+    return render();
+  }
+  if(act === 'color'){ view.draft.color = b.dataset.c; return render(); }
+  if(act === 'saveex'){
+    const d = view.draft;
+    if(!d.name.trim()){ alert('名前を入れてください'); return; }
+    d.amount = Number(d.amount) || 0;
+    d.points = Math.max(0, Number(d.points) || 0);
+    const old = exById(d.id);
+    if(old) db.exercises[db.exercises.indexOf(old)] = d; else db.exercises.push(d);
+    save(); return go('exercises');
+  }
+  if(act === 'delex'){
+    const used = db.menus.filter(m => m.items.some(it => it.exerciseId === view.draft.id));
+    if(!confirm(used.length ? used.length + 'つのメニューから外れます。削除しますか？' : '削除しますか？')) return;
+    db.exercises = db.exercises.filter(e => e.id !== view.draft.id);
+    db.menus.forEach(m => { m.items = m.items.filter(it => it.exerciseId !== view.draft.id); });
+    save(); return go('exercises');
+  }
+});
+
+// 入力は再描画せずに draft へ流し込む（打っている途中で消えないように）
+document.getElementById('app').addEventListener('input', ev => {
+  const t = ev.target;
+  if(!view.draft) return;
+  if(t.dataset.field){
+    const f = t.dataset.field;
+    view.draft[f] = t.value;
+    if(f === 'unit') render();   // 単位を変えたときだけ描き直す
+    return;
+  }
+  if(t.dataset.item !== undefined && t.dataset.key){
+    const it = view.draft.items[Number(t.dataset.item)];
+    if(it) it[t.dataset.key] = Number(t.value) || 0;
+  }
+});
+
+document.getElementById('app').addEventListener('change', ev => {
+  const t = ev.target;
+  if(t.dataset.act === 'additem' && t.value){
+    view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
+    render();
+  }
+});
+
+render();
+
+// ホーム画面に入れて、オフラインでも開けるようにする
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
