@@ -189,7 +189,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '1.0';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '1.1';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -396,6 +396,13 @@ function summary(){
     const c = cats[id] = cats[id] || {times:0, minutes:0, points:0};
     c.times += times; c.minutes += min; c.points += pt;
   };
+  // 明細：何に時間を使ったかを、名前ごとにまとめる
+  const items = {};
+  const bumpItem = (name, cat, min) => {
+    const k = cat + ' ' + name;
+    const it = items[k] = items[k] || {name, cat, times:0, minutes:0};
+    it.times++; it.minutes += min;
+  };
 
   db.logs.forEach(l => {
     const day = touch(l.date);
@@ -405,6 +412,7 @@ function summary(){
       day.min += l.minutes || 0;
       day.lv = day.lv >= 1 ? 3 : 1;
       bumpCat(l.cat || 'other', 1, l.minutes || 0, l.points || 0);
+      if(l.name) bumpItem(l.name, l.cat || 'other', l.minutes || 0);
       return;
     }
     const done = (l.entries || []).filter(en => en.done);
@@ -419,6 +427,7 @@ function summary(){
       day.min += min;
       bumpCat(e.cat, 1, min, Math.round(weight ? (l.points || 0) * min / weight
                                                : (l.points || 0) / done.length));
+      bumpItem(e.name, e.cat, min);
     });
     day.lv = day.lv >= 1 ? 3 : (l.mode === 'full' ? 2 : 1);
   });
@@ -447,6 +456,8 @@ function summary(){
     totalMinutes: Object.values(days).reduce((s,x) => s + x.min, 0),
     cats: CATS.filter(c => cats[c.id]).map(c => Object.assign(
       {id:c.id, name:c.name, color:COLORS[c.color]}, cats[c.id])),
+    items: Object.values(items).sort((a,b) => b.minutes - a.minutes || b.times - a.times)
+                               .slice(0, 60),
     days: ds.map(d => days[d]).filter(x => x.lv > 0 || x.rest)
   };
 }
@@ -937,8 +948,9 @@ function viewRecords(){
   // サイトに載せる用の書き出し
   h += '<h2>サイトに載せる</h2>' +
     '<div class="card"><div class="items" style="margin-bottom:12px">' +
-    'もそもそ奮闘記に載せる用のデータを作ります。出るのは数字だけで、' +
-    '種目名やスポット作業の中身は入りません。</div>' +
+    'もそもそ奮闘記に載せる用のデータを作ります。日ごとの時間とポイント、' +
+    'カテゴリ別の合計、それに<b>何をやったかの名前</b>（種目名・スポット作業名）が入ります。' +
+    'ごほうびの中身と、メモのたぐいは入りません。</div>' +
     '<div class="btns"><button class="primary" data-act="export">書き出してコピー</button>' +
     '<button data-act="exportfile">ファイルで保存</button></div>' +
     '<div id="exportbox" style="display:none;margin-top:10px">' +
