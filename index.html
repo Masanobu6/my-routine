@@ -190,7 +190,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '1.6';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '1.7';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -1074,8 +1074,6 @@ function viewRecords(){
     'ごほうびの中身と、メモのたぐいは入りません。</div>' +
     '<div class="btns"><button class="primary" data-act="export">書き出してコピー</button>' +
     '<button data-act="exportfile">ファイルで保存</button></div>' +
-    '<div class="btns" style="margin-top:8px">' +
-    '<button data-act="import">ファイルから戻す</button></div>' +
     '<div id="exportbox" style="display:none;margin-top:10px">' +
     '<textarea id="exporttext" readonly style="width:100%;height:120px;font-size:11px;' +
     'border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);' +
