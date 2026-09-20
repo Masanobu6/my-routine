@@ -188,7 +188,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.7';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '0.9';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -223,14 +223,13 @@ let run = null;
 let installEvt = null;   // Chrome が「入れられる」と言ってきたら入る
 
 function seed(){
-  const ex = (name,unit,amount,cat,points,minutes) =>
-    ({id:uid(), name, unit, amount, cat, points, minutes});
-  const stretch = ex('ストレッチ','チェック',0,'muscle',5,5);
-  const squat   = ex('スクワット','回',30,'muscle',10,5);
-  const pushup  = ex('腕立て伏せ','回',20,'muscle',10,5);
-  const plank   = ex('プランク','秒',60,'muscle',10,2);
-  const words   = ex('英単語','個',20,'english',15,15);
-  const read    = ex('読書','分',15,'other',10,15);
+  const ex = (name,unit,amount,cat,minutes) => ({id:uid(), name, unit, amount, cat, minutes});
+  const stretch = ex('ストレッチ','チェック',0,'muscle',5);
+  const squat   = ex('スクワット','回',30,'muscle',5);
+  const pushup  = ex('腕立て伏せ','回',20,'muscle',5);
+  const plank   = ex('プランク','秒',60,'muscle',2);
+  const words   = ex('英単語','個',20,'english',15);
+  const read    = ex('読書','分',15,'other',15);
   return {
     exercises:[stretch,squat,pushup,plank,words,read],
     menus:[
@@ -247,13 +246,13 @@ function seed(){
     ],
     logs:[],
     spots:[
-      {id:uid(), name:'確定申告の書類をそろえる', cat:'finance', minutes:60, points:30,
-       date:todayStr(), done:false}
+      {id:uid(), name:'確定申告の書類をそろえる', cat:'finance', minutes:60,
+       date:'', done:false}
     ],
     rewards:[
-      {id:uid(), name:'好きなラーメンを食べる', cost:300},
-      {id:uid(), name:'ゲーム1時間', cost:150},
-      {id:uid(), name:'マンガを1冊買う', cost:200}
+      {id:uid(), name:'好きなラーメンを食べる', cost:60},
+      {id:uid(), name:'ゲーム1時間', cost:24},
+      {id:uid(), name:'マンガを1冊買う', cost:36}
     ],
     redemptions:[],
     // 送信先とあいことばは、このスマホの中だけ。書き出すデータには入らない
@@ -271,7 +270,7 @@ function load(){
   if(!d.sync) d.sync = {url:'', key:'', auto:false};
   if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
-    if(typeof e.points !== 'number') e.points = 10;
+    delete e.points;   // ポイントは時間から決まるようになった
     // カテゴリと目安の時間は後から足した。色から見当をつけ、分の種目は量をそのまま使う
     if(!e.cat) e.cat = e.color === 'orange' ? 'muscle' : e.color === 'blue' ? 'it' : 'other';
     if(typeof e.minutes !== 'number') e.minutes = e.unit === '分' ? (e.amount || 0) : 0;
@@ -279,15 +278,13 @@ function load(){
   d.logs.forEach(l => {
     if(typeof l.points === 'number') return;
     if(l.mode === 'rest' || !l.entries){ l.points = 0; return; }
-    let p = 0, all = true;
+    let min = 0, all = true;
     l.entries.forEach(en => {
       const e = d.exercises.find(x => x.id === en.exerciseId);
       if(!en.done){ all = false; return; }
-      const base = e ? e.points : 10;
-      p += l.mode === 'mini' ? Math.ceil(base / 2) : base;
+      min += en.minutes || (e ? e.minutes || 0 : 0);
     });
-    if(all && l.entries.length) p += l.mode === 'mini' ? 5 : 10;
-    l.points = p;
+    l.points = Math.floor(min / 5) + (all && l.entries.length ? 1 : 0);
   });
   return d;
 }
@@ -301,10 +298,14 @@ const logFor   = (ds, menuId) => db.logs.find(l => l.date === ds && l.menuId ===
 
 /* スポット作業＝1回かぎりの用事。予定日が来たら「今日」に出る */
 const spotById   = id => db.spots.find(s => s.id === id);
-const spotsToday = () => db.spots.filter(s => !s.done && s.date <= todayStr())
-                                 .sort((a,b) => a.date.localeCompare(b.date));
-const spotsLater = () => db.spots.filter(s => !s.done && s.date > todayStr())
-                                 .sort((a,b) => a.date.localeCompare(b.date));
+// 日を決めた用事で、今日ぶんと過ぎたもの
+const spotsToday   = () => db.spots.filter(s => !s.done && s.date && s.date <= todayStr())
+                                   .sort((a,b) => a.date.localeCompare(b.date));
+// 日を決めていない用事。いつ押してもよく、押した日で記録される
+const spotsSomeday = () => db.spots.filter(s => !s.done && !s.date);
+// 先の日を決めた用事
+const spotsLater   = () => db.spots.filter(s => !s.done && s.date && s.date > todayStr())
+                                   .sort((a,b) => a.date.localeCompare(b.date));
 function minutesText(m){
   if(!m) return '';
   return m >= 60 ? (m % 60 ? Math.floor(m/60) + '時間' + (m%60) + '分' : Math.floor(m/60) + '時間')
@@ -340,8 +341,11 @@ function itemText(it){
    種目を1つ終えるたびに、その種目のポイント。
    ぜんぶ終えたら完了ボーナス。その日の最初の1本に連続ボーナス。
    ミニ版は半分（切り上げ）。                                        */
-const COMPLETE_BONUS = 10;
-const STREAK_BONUS_MAX = 30;
+const MIN_PER_PT = 5;          // 5分で1ポイント。5分に足りないぶんは切り捨て
+const COMPLETE_BONUS = 1;      // メニューやスポット作業をやりきったら
+const STREAK_BONUS_MAX = 5;    // その日の1本目にもらえる連続ボーナスの上限
+const ptFromMin = m => Math.floor((m || 0) / MIN_PER_PT);
+const streakBonusOf = st => Math.min(Math.ceil(st / 7), STREAK_BONUS_MAX);
 
 function earned(){ return db.logs.reduce((s,l) => s + (l.points || 0), 0); }
 function spent(){ return db.redemptions.reduce((s,r) => s + r.cost, 0); }
@@ -350,30 +354,34 @@ function level(){ return Math.floor(earned() / 100) + 1; }
 function levelRest(){ return 100 - (earned() % 100); }
 function ptOn(ds){ return logsOn(ds).reduce((s,l) => s + (l.points || 0), 0); }
 function menuPoints(m){
-  let p = 0;
-  m.items.forEach(it => { const e = exById(it.exerciseId); if(e) p += e.points; });
-  return p + (m.items.length ? COMPLETE_BONUS : 0);
+  let min = 0;
+  m.items.forEach(it => {
+    const e = exById(it.exerciseId);
+    if(e) min += (e.minutes || 0) * Math.max(1, it.sets);
+  });
+  return ptFromMin(min) + (m.items.length ? COMPLETE_BONUS : 0);
+}
+function menuMinutes(m){
+  let min = 0;
+  m.items.forEach(it => {
+    const e = exById(it.exerciseId);
+    if(e) min += (e.minutes || 0) * Math.max(1, it.sets);
+  });
+  return min;
 }
 
 /* 実行が終わったときの内訳を作る */
 function runPoints(){
-  const half = n => Math.ceil(n / 2);
-  const mini = run.mode === 'mini';
-  const items = [];
-  let base = 0;
-  run.queue.filter(q => q.done).forEach(q => {
-    const e = exById(q.exerciseId);
-    const p = mini ? half(e ? e.points : 10) : (e ? e.points : 10);
-    base += p;
-    items.push({name:q.name, p});
-  });
+  let min = 0;
+  run.queue.filter(q => q.done).forEach(q => { min += q.minutes * (q.setDone || 0); });
+  const base = ptFromMin(min);
   const all = run.queue.every(q => q.done);
-  const bonus = all ? (mini ? half(COMPLETE_BONUS) : COMPLETE_BONUS) : 0;
-  // その日ぜんぶで最初の完了なら連続ボーナス
+  const bonus = all ? COMPLETE_BONUS : 0;
+  // その日ぜんぶで最初の1本なら連続ボーナス
   const first = !logsOn(todayStr()).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
   const st = first ? Math.max(1, streak() + 1) : 0;   // まだ保存前なので今日のぶんを足す
-  const sb = first ? Math.min(st * 2, STREAK_BONUS_MAX) : 0;
-  return {items, base, bonus, streakDays:st, streakBonus:sb, total:base + bonus + sb};
+  const sb = first ? streakBonusOf(st) : 0;
+  return {minutes:min, base, bonus, streakDays:st, streakBonus:sb, total:base + bonus + sb};
 }
 
 /* ========== サイトに載せる用の書き出し ==========
@@ -399,13 +407,16 @@ function summary(){
       return;
     }
     const done = (l.entries || []).filter(en => en.done);
-    const weight = done.reduce((s,en) => { const e = exById(en.exerciseId); return s + (e ? e.points : 0); }, 0);
+    const weight = done.reduce((s,en) => {
+      const e = exById(en.exerciseId);
+      return s + (en.minutes || (e ? e.minutes || 0 : 0));
+    }, 0);
     done.forEach(en => {
       const e = exById(en.exerciseId);
       if(!e) return;
       const min = en.minutes || e.minutes || 0;
       day.min += min;
-      bumpCat(e.cat, 1, min, Math.round(weight ? (l.points || 0) * e.points / weight
+      bumpCat(e.cat, 1, min, Math.round(weight ? (l.points || 0) * min / weight
                                                : (l.points || 0) / done.length));
     });
     day.lv = day.lv >= 1 ? 3 : (l.mode === 'full' ? 2 : 1);
@@ -518,10 +529,16 @@ function viewToday(){
   list.forEach(m => { h += menuCard(m, ds); });
 
   // スポット作業
+  const someday = spotsSomeday();
   h += '<h2>スポット作業</h2>';
-  if(!spots.length) h += '<div class="empty" style="padding:14px">いまは空です。</div>';
+  if(!spots.length && !someday.length) h += '<div class="empty" style="padding:14px">いまは空です。</div>';
   spots.forEach(s => { h += spotRow(s, ds); });
   h += '<button class="addbtn" data-act="newspot">＋ スポット作業を足す</button>';
+
+  if(someday.length){
+    h += '<h2>いつかやる</h2>';
+    someday.forEach(s => { h += spotRow(s, ds); });
+  }
 
   const later = spotsLater();
   if(later.length){
@@ -542,8 +559,10 @@ function viewToday(){
 }
 
 function spotRow(s, ds, later){
-  const late = !s.done && s.date < ds;
-  const meta = [catOf(s.cat).name, minutesText(s.minutes), s.points + 'pt']
+  const late = !s.done && s.date && s.date < ds;
+  const meta = [catOf(s.cat).name,
+                s.spent ? 'ここまで ' + minutesText(s.spent) + '／' + (s.earned || 0) + 'pt'
+                        : (s.minutes ? '目安 ' + minutesText(s.minutes) : '')]
     .filter(Boolean).join(' ・ ');
   return '<div class="spot' + (s.done ? ' done' : '') + '">' +
     '<span class="dot" style="background:' + catColor(s.cat) + '"></span>' +
@@ -551,10 +570,12 @@ function spotRow(s, ds, later){
     '<div class="nm">' + esc(s.name) + '</div>' +
     '<div class="meta">' + meta +
       (late ? ' ・ <b style="color:var(--accent)">' + daysLate(s.date, ds) + '日すぎ</b>' : '') +
-      (later ? ' ・ ' + mdText(s.date) : '') + '</div></button>' +
+      (later && s.date ? ' ・ ' + mdText(s.date) : '') +
+      (s.done && s.doneDate ? ' ・ ' + mdText(s.doneDate) + ' にやった' : '') + '</div></button>' +
     (s.done
       ? '<button class="iconbtn" data-act="undospot" data-id="' + s.id + '">↩</button>'
-      : '<button class="get" data-act="dospot" data-id="' + s.id + '">やった</button>') +
+      : '<button class="get" data-act="startspot" data-id="' + s.id + '">' +
+        (s.spent ? 'つづき' : 'はじめる') + '</button>') +
     '</div>';
 }
 const mdText = ds => { const d = parseDate(ds); return (d.getMonth()+1) + '/' + d.getDate(); };
@@ -656,7 +677,8 @@ function viewExercises(){
       '<div class="meta">' + catOf(e.cat).name + ' ・ ' +
       (amountText(e.amount, e.unit) || 'チェックするだけ') +
       (e.minutes ? ' ・ ' + minutesText(e.minutes) : '') +
-      ' ・ ' + e.points + 'pt' + (used ? ' ・ ' + used + 'メニューで使用' : '') + '</div></div>' +
+      ' ・ ' + ptFromMin(e.minutes) + 'pt' +
+      (used ? ' ・ ' + used + 'メニューで使用' : '') + '</div></div>' +
       '<span class="go">›</span></button>';
   });
   return h + '<button class="addbtn" data-act="newex">＋ 種目を作る</button></div>';
@@ -674,14 +696,12 @@ function viewExEdit(){
     '<input inputmode="numeric" data-field="amount" value="' + e.amount + '"' +
     (e.unit === 'チェック' ? ' disabled' : '') + '></div></div></div>' +
     catPicker(e.cat) +
-    '<div class="field"><div class="inline">' +
-    '<div style="flex:1"><label>かかる時間（分）</label>' +
-    '<input inputmode="numeric" data-field="minutes" value="' + e.minutes + '"></div>' +
-    '<div style="flex:1"><label>もらえるポイント</label>' +
-    '<input inputmode="numeric" data-field="points" value="' + e.points + '"></div></div>' +
+    '<div class="field"><label>かかる時間（分）</label>' +
+    '<input inputmode="numeric" data-field="minutes" value="' + e.minutes + '">' +
     '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
-    '時間は目安。今日あと何分ぶん残っているかの計算に使う。' +
-    'ポイントはきつい種目ほど高くすると続けやすい。</div></div>';
+    'ポイントは時間から決まります（5分で1pt、5分に足りないぶんは切り捨て）。' +
+    'いまの入力だと <b style="color:var(--accent)">' + ptFromMin(Number(e.minutes) || 0) +
+    'pt</b>。この時間は「今日あと何分ぶん残っているか」にも使います。</div></div>';
   h += '<div class="bar">' +
     '<button class="primary" data-act="saveex">保存する</button>' +
     (view.isNew ? '' : '<button class="danger" data-act="delex">削除</button>') +
@@ -703,16 +723,26 @@ function viewSpotEdit(){
     '<div class="field"><label>やること</label>' +
     '<input data-field="name" value="' + esc(s.name) + '" placeholder="確定申告の書類をそろえる"></div>' +
     catPicker(s.cat) +
-    '<div class="field"><div class="inline">' +
-    '<div style="flex:1"><label>かかる時間（分）</label>' +
-    '<input inputmode="numeric" data-field="minutes" value="' + s.minutes + '"></div>' +
-    '<div style="flex:1"><label>もらえるポイント</label>' +
-    '<input inputmode="numeric" data-field="points" value="' + s.points + '"></div></div></div>' +
-    '<div class="field"><label>やる日</label>' +
-    '<input type="date" data-field="date" value="' + s.date + '"></div>' +
+    '<div class="field"><label>目安の時間（分・わからなければ空でいい）</label>' +
+    '<input inputmode="numeric" data-field="minutes" value="' + (s.minutes || '') + '">' +
+    '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
+    'ポイントは、実際にかかった時間から決まります（5分で1pt）。' +
+    'ここは「今日あと何分ぶん残っているか」の見当をつけるためだけの数字です。</div></div>' +
+    '<div class="field"><label>やる日（決めなくてもいい）</label>' +
+    '<input type="date" data-field="date" value="' + (s.date || '') + '">' +
+    '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
+    '決めなければ「いつかやる」に入ります。' +
+    'その場合は「やった」を押した日で記録されます。' +
+    (s.date ? '<br><button data-act="cleardate" style="color:var(--accent);font-weight:600;' +
+              'padding:6px 0">日を決めないことにする</button>' : '') +
+    '</div></div>' +
     '<div class="bar"><button class="primary" data-act="savespot">保存する</button>' +
     (view.isNew ? '' : '<button class="danger" data-act="delspot">削除</button>') +
-    '</div></div>';
+    '</div>' +
+    (view.isNew || s.done ? '' :
+      '<button class="addbtn" data-act="dospot" data-id="' + s.id + '">' +
+      '時間をはからずに終わりにする</button>') +
+    '</div>';
 }
 
 /* ========== 画面：ごほうび ========== */
@@ -747,10 +777,11 @@ function viewRewards(){
     });
   }
   h += '<h2>ポイントのつきかた</h2><div class="card" style="font-size:13px;color:var(--muted);line-height:2">' +
-    '種目を1つ終える … その種目のポイント<br>' +
+    '<b style="color:var(--accent)">5分で1pt</b>。5分に足りないぶんは切り捨て<br>' +
     'メニューをやりきる … ＋' + COMPLETE_BONUS + 'pt<br>' +
-    'その日の1本目 … 連続日数×2pt（最大' + STREAK_BONUS_MAX + 'pt）<br>' +
-    'ミニ版 … 半分（切り上げ）<br>' +
+    'スポット作業をやりきる … ＋' + COMPLETE_BONUS + 'pt<br>' +
+    'その日の1本目 … ＋1pt（続くほど増える。最大' + STREAK_BONUS_MAX + 'pt）<br>' +
+    'メニューの時間は種目に決めた目安、スポット作業ははかった実時間<br>' +
     'これまでの合計 ' + bal + 'pt ・ つかった ' + spent() + 'pt</div>' +
     '<div style="text-align:center;font-size:11px;color:var(--muted);margin:18px 0 4px">' +
     'マイメニュー v' + BUILD + '</div>';
@@ -840,12 +871,14 @@ function viewRecords(){
     const doneEntries = l.entries.filter(en => en.done);
     // メニューのポイントは1本ぶんをまとめて持っているので、種目の重みで割って配る
     const weight = doneEntries.reduce((s,en) => {
-      const e = exById(en.exerciseId); return s + (e ? e.points : 0);
+      const e = exById(en.exerciseId);
+      return s + (en.minutes || (e ? e.minutes || 0 : 0));
     }, 0);
     doneEntries.forEach(en => {
       const e = exById(en.exerciseId);
       if(!e) return;
-      const share = weight ? (l.points || 0) * e.points / weight
+      const mn = en.minutes || e.minutes || 0;
+      const share = weight ? (l.points || 0) * mn / weight
                            : (l.points || 0) / doneEntries.length;
       bump(e.cat, 1, en.minutes || e.minutes || 0, Math.round(share));
     });
@@ -946,8 +979,10 @@ function startRun(menuId, mode){
     if(!e) return;
     const amount = mode === 'mini' ? miniAmount(it.amount) : it.amount;
     const sets = mode === 'mini' ? 1 : Math.max(1, it.sets);
-    queue.push({exerciseId:e.id, name:e.name, unit:e.unit, amount, sets, rest:it.rest || 0,
-                setDone:0, done:false});
+    const minutes = mode === 'mini' ? Math.max(1, Math.round((e.minutes || 0) * MINI_RATE))
+                                    : (e.minutes || 0);
+    queue.push({exerciseId:e.id, name:e.name, unit:e.unit, amount, sets, minutes,
+                rest:it.rest || 0, setDone:0, done:false});
   });
   if(!queue.length) return;
   run = {menuId, mode, queue, idx:0, startedAt:Date.now(), resting:false, restLeft:0,
@@ -956,6 +991,48 @@ function startRun(menuId, mode){
   render();
   run.timer = setInterval(tick, 1000);
 }
+/* スポット作業は時間をはかる。押した日で記録される */
+function startSpot(id){
+  const s = spotById(id);
+  if(!s || s.done) return;
+  run = {kind:'spot', spotId:id, startedAt:Date.now(), timer:null, finished:false};
+  document.body.classList.add('running');
+  render();
+  run.timer = setInterval(tick, 1000);
+}
+
+/* complete=true なら終わり、false なら途中まで（タスクは残る） */
+function finishSpot(complete){
+  const s = spotById(run.spotId);
+  if(!s){ stopRun(); return; }
+  if(run.timer) clearInterval(run.timer);
+  run.timer = null;
+
+  const mins = Math.max(0, Math.floor((Date.now() - run.startedAt) / 60000));
+  const ds = todayStr();
+  const first = !logsOn(ds).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
+  const sb = first ? streakBonusOf(Math.max(1, streak() + 1)) : 0;
+
+  // ポイントは「たまった時間」から出す。5分に足りないぶんは次に持ちこす
+  const already = s.earned || 0;
+  const total   = (s.spent || 0) + mins;
+  const base    = Math.max(0, ptFromMin(total) - already) + (complete ? COMPLETE_BONUS : 0);
+
+  s.spent  = total;
+  s.earned = already + base;
+  if(complete){ s.done = true; s.doneDate = ds; }
+
+  db.logs.push({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
+                points:base + sb, minutes:mins, cat:s.cat, name:s.name, partial:!complete});
+
+  run.finished = true;
+  run.gain = {total:base + sb, base, streakBonus:sb, mins, complete, spent:s.spent,
+              bonus:complete ? COMPLETE_BONUS : 0};
+  save();
+  autoSend();
+  render();
+}
+
 function stopRun(){
   if(run && run.timer) clearInterval(run.timer);
   run = null;
@@ -965,6 +1042,12 @@ function stopRun(){
 }
 function tick(){
   if(!run) return;
+  if(run.kind === 'spot'){
+    if(run.finished) return;
+    const el = document.getElementById('elapsed');
+    if(el) el.textContent = mmss(Math.floor((Date.now() - run.startedAt) / 1000));
+    return;
+  }
   if(run.resting){
     run.restLeft--;
     if(run.restLeft <= 0){ run.resting = false; beep(); }
@@ -1016,11 +1099,8 @@ function finishRun(){
   db.logs.push({
     id: ds + '_' + run.menuId, date: ds, menuId: run.menuId, mode: run.mode,
     durationSec: run.durationSec, points: run.gain.total,
-    entries: run.queue.map(q => {
-      const e = exById(q.exerciseId);
-      return {exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0), done:q.done,
-              minutes:(e ? e.minutes || 0 : 0) * (q.setDone || 0)};
-    })
+    entries: run.queue.map(q => ({exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0),
+                                 done:q.done, minutes:q.minutes * (q.setDone || 0)}))
   });
   save();
   autoSend();
@@ -1028,10 +1108,12 @@ function finishRun(){
 }
 
 function viewRun(){
+  if(run.kind === 'spot') return viewRunSpot();
   const q = run.queue, it = q[run.idx];
   if(run.finished){
     const n = q.filter(x => x.done).length, g = run.gain;
-    let bd = '<div><span>種目 ' + n + 'つ</span><b>+' + g.base + '</b></div>';
+    let bd = '<div><span>' + minutesText(g.minutes) + '（種目 ' + n + 'つ）</span>' +
+             '<b>+' + g.base + '</b></div>';
     if(g.bonus)       bd += '<div><span>ぜんぶ完了</span><b>+' + g.bonus + '</b></div>';
     if(g.streakBonus) bd += '<div><span>' + g.streakDays + '日れんぞく</span><b>+' + g.streakBonus + '</b></div>';
     return '<div id="run"><div class="rtop"></div>' +
@@ -1064,6 +1146,39 @@ function viewRun(){
     (it.sets > 1 ? '<div class="set">セット ' + (it.setDone + 1) + ' / ' + it.sets + '</div>' : '') +
     '</div><div class="rbtns"><button class="primary" data-act="doneset">できた</button>' +
     '<div class="side"><button data-act="skipitem">とばす</button></div></div></div>';
+}
+
+function viewRunSpot(){
+  const s = spotById(run.spotId);
+  if(!s) return '<div id="run"><div class="rbtns">' +
+    '<button class="primary" data-act="closerun">とじる</button></div></div>';
+
+  if(run.finished){
+    const g = run.gain;
+    let bd = '<div><span>' + g.mins + '分</span><b>+' + (g.base - (g.bonus || 0)) + '</b></div>';
+    if(g.bonus)       bd += '<div><span>やりきった</span><b>+' + g.bonus + '</b></div>';
+    if(g.streakBonus) bd += '<div><span>今日の1本目</span><b>+' + g.streakBonus + '</b></div>';
+    return '<div id="run"><div class="rtop"></div><div class="rbody">' +
+      '<div class="nm">' + (g.complete ? 'おつかれさま 🎉' : 'ここまで記録しました') + '</div>' +
+      '<div class="gain">+' + g.total + '<small>pt</small></div>' +
+      '<div class="bd">' + bd + '</div>' +
+      '<div class="set" style="margin-top:14px">' +
+      (g.complete ? '合計 ' + minutesText(g.spent) : 'ここまで ' + minutesText(g.spent) + '（つづきはまた今度）') +
+      ' ・ 残高 ' + balance() + 'pt</div>' +
+      '</div><div class="rbtns">' +
+      '<button class="primary" data-act="closerun">とじる</button></div></div>';
+  }
+
+  const sec = Math.floor((Date.now() - run.startedAt) / 1000);
+  return '<div id="run"><div class="rtop">' +
+    '<button class="stop" data-act="abort">やめる</button>' +
+    '<span class="mid">' + catOf(s.cat).name +
+    (s.spent ? ' ・ ここまで ' + minutesText(s.spent) : '') + '</span></div>' +
+    '<div class="rbody"><div class="nm">' + esc(s.name) + '</div>' +
+    '<div class="cd" id="elapsed">' + mmss(sec) + '</div>' +
+    '<div class="set">5分で1ポイント</div></div>' +
+    '<div class="rbtns"><button class="primary" data-act="spotdone">おわり</button>' +
+    '<div class="side"><button data-act="spotpart">途中まで</button></div></div></div>';
 }
 
 /* ========== 描画 ========== */
@@ -1143,10 +1258,16 @@ document.getElementById('app').addEventListener('click', ev => {
   if(act === 'skiprest'){ run.resting = false; return render(); }
   if(act === 'rest10'){ run.restLeft += 10; return render(); }
   if(act === 'abort'){
-    if(confirm('中断します。ここまでの分は記録しません。')) stopRun();
+    const msg = run && run.kind === 'spot'
+      ? 'やめます。いま計った時間は記録しません。記録したいなら「途中まで」を押してください。'
+      : '中断します。ここまでの分は記録しません。';
+    if(confirm(msg)) stopRun();
     return;
   }
   if(act === 'closerun') return stopRun();
+  if(act === 'startspot') return startSpot(id);
+  if(act === 'spotdone') return finishSpot(true);
+  if(act === 'spotpart') return finishSpot(false);
 
   // メニュー編集
   if(act === 'newmenu'){
@@ -1212,7 +1333,7 @@ document.getElementById('app').addEventListener('click', ev => {
   // スポット作業
   if(act === 'newspot'){
     view = {name:'spotEdit', isNew:true,
-            draft:{id:uid(), name:'', cat:'other', minutes:30, points:20, date:todayStr(), done:false}};
+            draft:{id:uid(), name:'', cat:'other', minutes:0, date:'', done:false}};
     return render();
   }
   if(act === 'editspot'){
@@ -1223,8 +1344,7 @@ document.getElementById('app').addEventListener('click', ev => {
     const d = view.draft;
     if(!d.name.trim()){ alert('やることを書いてください'); return; }
     d.minutes = Math.max(0, Number(d.minutes) || 0);
-    d.points  = Math.max(0, Number(d.points) || 0);
-    if(!d.date) d.date = todayStr();
+    if(!d.date) d.date = '';
     const old = spotById(d.id);
     if(old) db.spots[db.spots.indexOf(old)] = d; else db.spots.push(d);
     save(); return go('today');
@@ -1235,31 +1355,38 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return go('today');
   }
   if(act === 'dospot'){
+    // 時間をはからずに終わりにする。目安の時間でポイントを出す
     const s = spotById(id);
     if(!s || s.done) return;
+    if(!confirm('時間をはからずに終わりにします。目安の時間（' +
+                (minutesText(s.minutes) || '0分') + '）でポイントが入ります。')) return;
     const ds = todayStr();
     const first = !logsOn(ds).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
-    const sb = first ? Math.min(Math.max(1, streak() + 1) * 2, STREAK_BONUS_MAX) : 0;
+    const sb = first ? streakBonusOf(Math.max(1, streak() + 1)) : 0;
+    const total = (s.spent || 0) + (s.minutes || 0);
+    const base = Math.max(0, ptFromMin(total) - (s.earned || 0)) + COMPLETE_BONUS;
+    s.spent = total; s.earned = (s.earned || 0) + base;
     s.done = true; s.doneDate = ds;
-    db.logs.push({id:'spot_' + s.id, date:ds, spotId:s.id, mode:'spot',
-                  points:s.points + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name});
-    save(); autoSend(); render();
-    if(sb) setTimeout(() => alert('+' + (s.points + sb) + 'pt（うち連続ボーナス +' + sb + '）'), 30);
+    db.logs.push({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
+                  points:base + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name});
+    save(); autoSend(); go('today');
+    setTimeout(() => alert('+' + (base + sb) + 'pt'), 30);
     return;
   }
   if(act === 'undospot'){
     const s = spotById(id);
     if(!s) return;
-    const log = db.logs.find(l => l.spotId === s.id);
-    if(log && balance() - (log.points || 0) < 0){
+    const pts = db.logs.filter(l => l.spotId === s.id).reduce((a,l) => a + (l.points || 0), 0);
+    if(balance() - pts < 0){
       alert('取り消すと、交換ずみのごほうびのぶんだけポイントが足りなくなります。\n先に「ごほうび」の交換履歴を消してください。');
       return;
     }
-    s.done = false; delete s.doneDate;
+    s.done = false; delete s.doneDate; s.spent = 0; s.earned = 0;
     db.logs = db.logs.filter(l => l.spotId !== s.id);
     save(); return render();
   }
   if(act === 'cat'){ view.draft.cat = b.dataset.c; return render(); }
+  if(act === 'cleardate'){ view.draft.date = ''; return render(); }
 
   // ごほうび
   if(act === 'newreward'){
@@ -1301,7 +1428,7 @@ document.getElementById('app').addEventListener('click', ev => {
   // 種目編集
   if(act === 'newex'){
     view = {name:'exEdit', isNew:true,
-            draft:{id:uid(), name:'', unit:'回', amount:10, cat:'other', points:10, minutes:5}};
+            draft:{id:uid(), name:'', unit:'回', amount:10, cat:'other', minutes:5}};
     return render();
   }
   if(act === 'editex'){
@@ -1312,7 +1439,6 @@ document.getElementById('app').addEventListener('click', ev => {
     const d = view.draft;
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
     d.amount  = Number(d.amount) || 0;
-    d.points  = Math.max(0, Number(d.points) || 0);
     d.minutes = Math.max(0, Number(d.minutes) || 0);
     const old = exById(d.id);
     if(old) db.exercises[db.exercises.indexOf(old)] = d; else db.exercises.push(d);

@@ -2,6 +2,11 @@ name = "my-routine-records"
 main = "src/worker.js"
 compatibility_date = "2026-01-01"
 
+# もそもそ奮闘記と同じドメインの下に置く（Cloudflare が DNS も作る）
+routes = [
+  { pattern = "records.mosomoso-history.com", custom_domain = true }
+]
+
 # npx wrangler kv namespace create RECORDS で作って、出てきた id をここに書く
 [[kv_namespaces]]
 binding = "RECORDS"
