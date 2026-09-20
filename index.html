@@ -177,6 +177,7 @@ body.running #tabs{display:none}
 </head>
 <body>
 <div id="app"></div>
+<input type="file" id="importfile" accept="application/json,.json" style="display:none">
 <nav id="tabs">
   <button data-tab="today"><span class="ic">☀</span>今日</button>
   <button data-tab="menus"><span class="ic">☰</span>メニュー</button>
@@ -189,7 +190,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '1.4';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '1.5';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -1073,6 +1074,9 @@ function viewRecords(){
     'ごほうびの中身と、メモのたぐいは入りません。</div>' +
     '<div class="btns"><button class="primary" data-act="export">書き出してコピー</button>' +
     '<button data-act="exportfile">ファイルで保存</button></div>' +
+    '<div class="btns" style="margin-top:8px">' +
+    '<button data-act="backupfile">まるごと保存（控え）</button>' +
+    '<button data-act="import">ファイルから戻す</button></div>' +
     '<div id="exportbox" style="display:none;margin-top:10px">' +
     '<textarea id="exporttext" readonly style="width:100%;height:120px;font-size:11px;' +
     'border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);' +
@@ -1571,6 +1575,16 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return go('menus');
   }
 
+  if(act === 'backupfile'){
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(dataPayload())],
+                                         {type:'application/json'}));
+    a.download = 'my-routine-' + todayStr() + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    return;
+  }
+  if(act === 'import'){ document.getElementById('importfile').click(); return; }
   if(act === 'syncnow')  return syncPull(true);
   if(act === 'sendnow')  return syncPush(true);
 
@@ -1752,6 +1766,29 @@ document.getElementById('app').addEventListener('change', ev => {
     view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
     render();
   }
+});
+
+document.getElementById('importfile').addEventListener('change', ev => {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';                 // 同じファイルを選び直せるように
+  if(!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    let d;
+    try { d = JSON.parse(fr.result); } catch(e){ alert('このファイルは読めませんでした。'); return; }
+    if(!d || !Array.isArray(d.logs)){ alert('マイメニューの控えではないようです。'); return; }
+    if(!confirm('この端末の記録を、ファイルの中身で置きかえます。いまの記録は消えます。'
+                + '（記録 ' + d.logs.length + '件）')) return;
+    try { localStorage.setItem(KEY + '.backup', JSON.stringify(db)); } catch(e){}
+    const keep = db.sync;
+    db = migrate(d);
+    db.sync = keep;
+    save();                              // 送り出す側になる
+    view = {name:'today'};
+    render();
+    alert('戻しました。');
+  };
+  fr.readAsText(f);
 });
 
 render();

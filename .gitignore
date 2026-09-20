@@ -6,3 +6,5 @@ worker/.wrangler/
 
 # ローカル検証用（本番の値は入れない）
 worker/.dev.vars
+
+restore-2026-09-20.json
