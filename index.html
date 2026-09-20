@@ -112,6 +112,7 @@ body.running #tabs{display:none}
 .rbody .set{font-size:15px;color:var(--muted)}
 .rbody .rest{font-size:15px;color:var(--accent);font-weight:700;letter-spacing:.1em}
 .rbody .cd{font-size:80px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.rbody .cd.paused{color:var(--muted)}
 .rbtns{display:flex;flex-direction:column;gap:10px}
 .rbtns button{padding:18px;border-radius:14px;font-size:17px;font-weight:700;
   background:var(--card);border:1px solid var(--line)}
@@ -188,7 +189,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.9';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '1.0';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -513,6 +514,20 @@ function viewToday(){
     '</div></div>';
 
   if(allDone) h += '<div class="praise">今日の分、ぜんぶ終わりました 🎉</div>';
+
+  if(pendingRun){
+    const r = pendingRun;
+    const nm = r.kind === 'spot' ? (r.name || 'スポット作業') : (r.name || 'メニュー');
+    h += '<div class="card" style="border-color:var(--accent)">' +
+      '<div class="card-top"><b>計りかけのタイマーがあります</b></div>' +
+      '<div class="items" style="-webkit-line-clamp:none;display:block">' + esc(nm) +
+      ' ・ ここまで ' + mmss(r.elapsed || 0) + '<br>' +
+      'アプリが閉じたので止めてあります。</div>' +
+      '<div class="btns"><button class="primary" data-act="resumerun">つづける</button>' +
+      (r.kind === 'spot'
+        ? '<button data-act="bankrun">記録する</button>' : '') +
+      '<button class="ghost" data-act="droprun">捨てる</button></div></div>';
+  }
 
   if(installEvt){
     h += '<div class="card" style="border-color:var(--accent)">' +
@@ -985,18 +1000,75 @@ function startRun(menuId, mode){
                 rest:it.rest || 0, setDone:0, done:false});
   });
   if(!queue.length) return;
-  run = {menuId, mode, queue, idx:0, startedAt:Date.now(), resting:false, restLeft:0,
-         timer:null, finished:false};
+  run = {menuId, mode, name:m.name, queue, idx:0, startedAt:Date.now(), elapsed:0, running:true,
+         resting:false, restLeft:0, timer:null, finished:false};
   document.body.classList.add('running');
+  saveRun();
   render();
   run.timer = setInterval(tick, 1000);
 }
+/* ===== タイマー =====
+   経過時間は「ためた秒数 ＋ いま動いている分」で出す。
+   一時停止しても、アプリが落ちても、時間を取りこぼさないため。       */
+const RUNKEY = 'myroutine.run';
+let pendingRun = loadRun();     // 前回、計りかけで終わってしまったもの
+
+function runElapsed(){
+  if(!run) return 0;
+  return (run.elapsed || 0) +
+         (run.running && run.startedAt ? Math.floor((Date.now() - run.startedAt) / 1000) : 0);
+}
+function saveRun(){
+  try {
+    if(!run || run.finished){ localStorage.removeItem(RUNKEY); return; }
+    const copy = Object.assign({}, run, {elapsed:runElapsed(), running:run.running,
+                                         startedAt:null, timer:null, savedAt:Date.now()});
+    localStorage.setItem(RUNKEY, JSON.stringify(copy));
+  } catch(e){}
+}
+function loadRun(){
+  try { const s = localStorage.getItem(RUNKEY); return s ? JSON.parse(s) : null; } catch(e){ return null; }
+}
+function pauseRun(){
+  if(!run || !run.running) return;
+  run.elapsed = runElapsed();
+  run.running = false;
+  run.startedAt = null;
+  saveRun();
+  render();
+}
+function resumeRun(){
+  if(!run || run.running) return;
+  run.startedAt = Date.now();
+  run.running = true;
+  saveRun();
+  render();
+}
+/* 計りかけのものを、止まった状態で開きなおす */
+function restoreRun(){
+  if(!pendingRun) return;
+  run = pendingRun;
+  pendingRun = null;
+  run.running = false;      // 落ちていた間の時間は数えない
+  run.startedAt = null;
+  run.timer = setInterval(tick, 1000);
+  document.body.classList.add('running');
+  render();
+}
+function dropRun(){
+  pendingRun = null;
+  try { localStorage.removeItem(RUNKEY); } catch(e){}
+  render();
+}
+
 /* スポット作業は時間をはかる。押した日で記録される */
 function startSpot(id){
   const s = spotById(id);
   if(!s || s.done) return;
-  run = {kind:'spot', spotId:id, startedAt:Date.now(), timer:null, finished:false};
+  run = {kind:'spot', spotId:id, name:s.name, startedAt:Date.now(), elapsed:0, running:true,
+         timer:null, finished:false};
   document.body.classList.add('running');
+  saveRun();
   render();
   run.timer = setInterval(tick, 1000);
 }
@@ -1008,7 +1080,7 @@ function finishSpot(complete){
   if(run.timer) clearInterval(run.timer);
   run.timer = null;
 
-  const mins = Math.max(0, Math.floor((Date.now() - run.startedAt) / 60000));
+  const mins = Math.max(0, Math.floor(runElapsed() / 60));
   const ds = todayStr();
   const first = !logsOn(ds).some(l => l.mode === 'full' || l.mode === 'mini' || l.mode === 'spot');
   const sb = first ? streakBonusOf(Math.max(1, streak() + 1)) : 0;
@@ -1036,25 +1108,28 @@ function finishSpot(complete){
 function stopRun(){
   if(run && run.timer) clearInterval(run.timer);
   run = null;
+  try { localStorage.removeItem(RUNKEY); } catch(e){}
   document.body.classList.remove('running');
   view = {name:'today'};
   render();
 }
+let tickCount = 0;
 function tick(){
-  if(!run) return;
+  if(!run || run.finished) return;
+  if(!run.running) return;                 // 一時停止中は何も進めない
+  if(++tickCount % 15 === 0) saveRun();    // 落ちても15秒ぶんしか失わないように
   if(run.kind === 'spot'){
-    if(run.finished) return;
     const el = document.getElementById('elapsed');
-    if(el) el.textContent = mmss(Math.floor((Date.now() - run.startedAt) / 1000));
+    if(el) el.textContent = mmss(runElapsed());
     return;
   }
   if(run.resting){
     run.restLeft--;
     if(run.restLeft <= 0){ run.resting = false; beep(); }
     render();
-  } else if(!run.finished){
+  } else {
     const el = document.getElementById('elapsed');
-    if(el) el.textContent = mmss(Math.floor((Date.now() - run.startedAt) / 1000));
+    if(el) el.textContent = mmss(runElapsed());
   }
 }
 function mmss(s){ return pad(Math.floor(s / 60)) + ':' + pad(s % 60); }
@@ -1091,7 +1166,7 @@ function finishRun(){
   if(run.timer) clearInterval(run.timer);
   run.timer = null;
   run.finished = true;
-  run.durationSec = Math.floor((Date.now() - run.startedAt) / 1000);
+  run.durationSec = runElapsed();
   const ds = todayStr();
   const old = logFor(ds, run.menuId);
   if(old) db.logs = db.logs.filter(l => l !== old);
@@ -1137,15 +1212,20 @@ function viewRun(){
   const unit = it.unit === 'チェック' ? '' : '<small>' + it.unit + '</small>';
   return '<div id="run"><div class="rtop"><button class="stop" data-act="abort">中断</button>' +
     '<span class="mid">' + (run.idx + 1) + ' / ' + q.length + '</span>' +
-    '<span id="elapsed">' + mmss(Math.floor((Date.now() - run.startedAt) / 1000)) + '</span></div>' +
+    '<span id="elapsed">' + mmss(runElapsed()) + (run.running ? '' : ' ⏸') + '</span></div>' +
     '<div class="prog"><i style="width:' + pct + '%"></i></div>' +
     '<div class="rbody">' +
     (run.mode === 'mini' ? '<div class="rest">ミニ版</div>' : '') +
     '<div class="nm">' + esc(it.name) + '</div>' +
     '<div class="amt">' + amt + unit + '</div>' +
     (it.sets > 1 ? '<div class="set">セット ' + (it.setDone + 1) + ' / ' + it.sets + '</div>' : '') +
-    '</div><div class="rbtns"><button class="primary" data-act="doneset">できた</button>' +
-    '<div class="side"><button data-act="skipitem">とばす</button></div></div></div>';
+    '</div><div class="rbtns">' +
+    (run.running ? '<button class="primary" data-act="doneset">できた</button>'
+                 : '<button class="primary" data-act="resume">再開する</button>') +
+    '<div class="side">' +
+    (run.running ? '<button data-act="pause">一時停止</button>'
+                 : '<button data-act="doneset">できた</button>') +
+    '<button data-act="skipitem">とばす</button></div></div></div>';
 }
 
 function viewRunSpot(){
@@ -1169,16 +1249,21 @@ function viewRunSpot(){
       '<button class="primary" data-act="closerun">とじる</button></div></div>';
   }
 
-  const sec = Math.floor((Date.now() - run.startedAt) / 1000);
+  const paused = !run.running;
   return '<div id="run"><div class="rtop">' +
     '<button class="stop" data-act="abort">やめる</button>' +
     '<span class="mid">' + catOf(s.cat).name +
     (s.spent ? ' ・ ここまで ' + minutesText(s.spent) : '') + '</span></div>' +
     '<div class="rbody"><div class="nm">' + esc(s.name) + '</div>' +
-    '<div class="cd" id="elapsed">' + mmss(sec) + '</div>' +
-    '<div class="set">5分で1ポイント</div></div>' +
-    '<div class="rbtns"><button class="primary" data-act="spotdone">おわり</button>' +
-    '<div class="side"><button data-act="spotpart">途中まで</button></div></div></div>';
+    '<div class="cd' + (paused ? ' paused' : '') + '" id="elapsed">' + mmss(runElapsed()) + '</div>' +
+    '<div class="set">' + (paused ? '一時停止中' : '5分で1ポイント') + '</div></div>' +
+    '<div class="rbtns">' +
+    (paused ? '<button class="primary" data-act="resume">再開する</button>'
+            : '<button class="primary" data-act="spotdone">おわり</button>') +
+    '<div class="side">' +
+    (paused ? '<button data-act="spotdone">おわり</button>'
+            : '<button data-act="pause">一時停止</button>') +
+    '<button data-act="spotpart">途中まで</button></div></div></div>';
 }
 
 /* ========== 描画 ========== */
@@ -1266,6 +1351,18 @@ document.getElementById('app').addEventListener('click', ev => {
   }
   if(act === 'closerun') return stopRun();
   if(act === 'startspot') return startSpot(id);
+  if(act === 'pause')  return pauseRun();
+  if(act === 'resume') return resumeRun();
+  if(act === 'resumerun'){ restoreRun(); return resumeRun(); }
+  if(act === 'droprun'){
+    if(!confirm('計った時間を捨てます。よろしいですか？')) return;
+    return dropRun();
+  }
+  if(act === 'bankrun'){
+    restoreRun();
+    if(run && run.kind === 'spot') finishSpot(false);
+    return;
+  }
   if(act === 'spotdone') return finishSpot(true);
   if(act === 'spotpart') return finishSpot(false);
 
