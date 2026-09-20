@@ -1,14 +1,17 @@
 /* 記録のあずかり所（Cloudflare Worker）
  *
- *   GET  /  … あずかっている JSON を返す。だれでも読める（ブログが読みに来る）
- *   POST /  … あいことば（x-key）が合っていれば、送られてきた JSON で置きかえる
+ *   GET  /       … ブログに載せる集計を返す。だれでも読める
+ *   POST /       … あいことば（x-key）が合っていれば、集計を置きかえる
  *
- * あいことばは wrangler secret put WRITE_KEY で入れる。
- * 中身は数字だけで、種目名や作業名は入っていない。
+ *   GET  /data   … アプリのデータ一式を返す。**あいことばが要る**
+ *   POST /data   … あいことばが合っていれば、データ一式を置きかえる
+ *
+ * /data は端末どうしで中身をそろえるためのもの。読むのにも鍵が要る。
+ * あいことばは wrangler secret か、ダッシュボードの Secret で入れる。
  */
 const EMPTY = '{"generated":"","streak":0,"bestStreak":0,"level":1,"points":0,' +
               '"totalTimes":0,"totalMinutes":0,"cats":[],"days":[]}';
-const MAX = 300 * 1024;   // 300KB より大きいものは受け取らない
+const MAX = 2 * 1024 * 1024;   // 2MB より大きいものは受け取らない
 
 const cors = {
   'access-control-allow-origin': '*',
@@ -17,33 +20,42 @@ const cors = {
 };
 const reply = (body, status, extra) =>
   new Response(body, {status, headers:Object.assign({}, cors, extra)});
+const json = (body, status) =>
+  reply(body, status || 200, {'content-type':'application/json; charset=utf-8',
+                              'cache-control':'no-store'});
 
 export default {
   async fetch(req, env){
     if(req.method === 'OPTIONS') return reply(null, 204);
 
+    const path = new URL(req.url).pathname.replace(/\/+$/, '');
+    const isData = path === '/data';
+    const key = isData ? 'appdata' : 'records';
+
+    if(!env.WRITE_KEY) return reply('あいことばが未設定', 500);
+    const ok = safeEqual(req.headers.get('x-key') || '', env.WRITE_KEY);
+
     if(req.method === 'GET'){
-      const v = await env.RECORDS.get('records');
-      return reply(v || EMPTY, 200, {
-        'content-type': 'application/json; charset=utf-8',
-        'cache-control': 'public, max-age=300',
-      });
+      // データ一式は、読むのにもあいことばが要る
+      if(isData && !ok) return reply('あいことばが違う', 403);
+      const v = await env.RECORDS.get(key);
+      if(isData) return json(v || 'null');
+      return reply(v || EMPTY, 200, {'content-type':'application/json; charset=utf-8',
+                                     'cache-control':'public, max-age=300'});
     }
 
     if(req.method === 'POST'){
-      if(!env.WRITE_KEY) return reply('あいことばが未設定', 500);
-      const given = req.headers.get('x-key') || '';
-      // 長さの違いで中身を当てられないように、一定時間で比べる
-      if(!safeEqual(given, env.WRITE_KEY)) return reply('あいことばが違う', 403);
-
+      if(!ok) return reply('あいことばが違う', 403);
       const text = await req.text();
       if(text.length > MAX) return reply('大きすぎる', 413);
       let data;
       try { data = JSON.parse(text); } catch(e){ return reply('JSONとして読めない', 400); }
-      if(!data || !Array.isArray(data.days)) return reply('形が違う', 400);
+      if(!data || typeof data !== 'object') return reply('形が違う', 400);
+      if(!isData && !Array.isArray(data.days)) return reply('形が違う', 400);
+      if(isData && !Array.isArray(data.logs)) return reply('形が違う', 400);
 
-      await env.RECORDS.put('records', text);
-      return reply('ok', 200);
+      await env.RECORDS.put(key, text);
+      return json(JSON.stringify({ok:true, savedAt:Date.now()}));
     }
 
     return reply('だめ', 405);

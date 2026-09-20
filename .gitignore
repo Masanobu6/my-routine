@@ -3,3 +3,6 @@
 # wrangler の作業用キャッシュ
 worker/.wrangler/
 .wrangler/
+
+# ローカル検証用（本番の値は入れない）
+worker/.dev.vars

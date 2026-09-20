@@ -189,7 +189,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '1.2';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '1.3';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -254,19 +254,28 @@ function seed(){
       {id:uid(), name:'マンガを1冊買う', cost:36}
     ],
     redemptions:[],
-    // 送信先とあいことばは、このスマホの中だけ。書き出すデータには入らない
-    sync:{url:SYNC_URL, key:'', auto:false}
+    // 送信先とあいことばは、この端末の中だけ。送るデータには入らない
+    sync:{url:SYNC_URL, key:'', auto:false, device:''},
+    // まっさらの状態は「この端末で変えた」に数えない。
+    // でないと、初めての端末で必ず取り合いの確認が出てしまう
+    updatedAt:0, syncedAt:0
   };
 }
 function load(){
   let d = null;
   try { const s = localStorage.getItem(KEY); if(s) d = JSON.parse(s); } catch(e){}
   if(!d) return seed();
-  // 古いデータをポイント対応にする
+  return migrate(d);
+}
+/* 古いデータを今の形に直す。取り込んだデータにも通す */
+function migrate(d){
   if(!d.rewards) d.rewards = [];
   if(!d.redemptions) d.redemptions = [];
   if(!d.spots) d.spots = [];
   if(!d.sync) d.sync = {url:'', key:'', auto:false};
+  if(!d.sync.device) d.sync.device = '';
+  if(typeof d.updatedAt !== 'number') d.updatedAt = Date.now();
+  if(typeof d.syncedAt !== 'number') d.syncedAt = 0;
   d.logs.forEach(l => { if(l.mode === 'mini') l.mode = 'full'; });   // ミニ版は廃止した
   if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
@@ -288,7 +297,14 @@ function load(){
   });
   return d;
 }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(db)); } catch(e){} }
+/* 変えたときは save()。取り込んだものを書くだけなら saveQuiet()
+   （updatedAt を動かすと「この端末の方が新しい」と誤解されるため）  */
+function save(){
+  db.updatedAt = Date.now();
+  saveQuiet();
+  schedulePush();
+}
+function saveQuiet(){ try { localStorage.setItem(KEY, JSON.stringify(db)); } catch(e){} }
 
 const exById   = id => db.exercises.find(e => e.id === id);
 const menuById = id => db.menus.find(m => m.id === id);
@@ -470,27 +486,102 @@ function summary(){
 }
 
 /* 書き出したものを、あずかり所へ送る。失敗しても記録そのものは無事 */
-function sendSummary(manual){
-  const s = db.sync || {};
-  if(!s.url){ if(manual) alert('送信先のURLを入れてください。'); return; }
-  const now = new Date();
-  const stamp = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  fetch(s.url, {method:'POST',
-                headers:{'content-type':'application/json', 'x-key':s.key || ''},
-                body:JSON.stringify(summary())})
+/* ===== 同期 =====
+   あずかり所に「データ一式」と「ブログ用の集計」を置く。
+   あいことばを入れた端末どうしで中身がそろう。                      */
+const syncReady = () => !!(db.sync && db.sync.url && db.sync.key);
+const dataUrl = () => db.sync.url.replace(/\/+$/, '') + '/data';
+const nowStamp = () => { const n = new Date(); return pad(n.getHours()) + ':' + pad(n.getMinutes()); };
+
+/* 送る中身。URL・あいことば・端末名は送らない（端末ごとのものなので） */
+function dataPayload(){
+  const c = Object.assign({}, db);
+  delete c.sync;
+  return c;
+}
+/* 取り込む。同期の設定はこの端末のものを残す */
+function adopt(remote){
+  const keep = db.sync;
+  db = migrate(remote);
+  db.sync = keep;
+  db.syncedAt = db.updatedAt;
+  saveQuiet();
+}
+
+function syncPush(manual){
+  if(!syncReady()) return Promise.resolve(false);
+  const stamp = nowStamp();
+  return fetch(dataUrl(), {method:'POST',
+      headers:{'content-type':'application/json', 'x-key':db.sync.key},
+      body:JSON.stringify(dataPayload())})
     .then(r => {
-      db.sync.last = r.ok ? todayStr() + ' ' + stamp + ' に送信'
-                          : todayStr() + ' ' + stamp + ' 失敗（' + r.status + '）';
-      save();
-      if(manual){ alert(r.ok ? 'サイトに送りました。' : '送れませんでした（' + r.status + '）'); render(); }
+      if(!r.ok) throw r.status;
+      db.syncedAt = db.updatedAt;
+      db.sync.last = stamp + ' 送信';
+      saveQuiet();
+      // ブログ用の集計も一緒に置きかえる
+      return fetch(db.sync.url, {method:'POST',
+        headers:{'content-type':'application/json', 'x-key':db.sync.key},
+        body:JSON.stringify(summary())}).catch(() => {});
     })
-    .catch(() => {
-      db.sync.last = todayStr() + ' ' + stamp + ' 失敗（つながらない）';
-      save();
-      if(manual){ alert('送れませんでした。電波かURLを確かめてください。'); render(); }
+    .then(() => { if(manual){ alert('送りました。'); render(); } return true; })
+    .catch(e => {
+      db.sync.last = stamp + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
+      saveQuiet();
+      if(manual){ alert('送れませんでした（' + (e === 403 ? 'あいことばが違います' : e || 'つながりません') + '）'); render(); }
+      return false;
     });
 }
-const autoSend = () => { if(db.sync && db.sync.auto && db.sync.url) sendSummary(false); };
+
+function syncPull(manual){
+  if(!syncReady()){ if(manual) alert('あいことばを入れてください。'); return Promise.resolve(false); }
+  const stamp = nowStamp();
+  return fetch(dataUrl(), {headers:{'x-key':db.sync.key}})
+    .then(r => { if(!r.ok) throw r.status; return r.json(); })
+    .then(remote => {
+      if(!remote || !Array.isArray(remote.logs)){
+        // まだ何も置かれていない。この端末のを置く
+        return syncPush(manual);
+      }
+      const mine   = (db.updatedAt || 0) > (db.syncedAt || 0);   // この端末で変えた
+      const theirs = (remote.updatedAt || 0) > (db.syncedAt || 0); // 向こうも変わった
+
+      if(!theirs){
+        if(mine) return syncPush(manual);
+        db.sync.last = stamp + ' 同期ずみ'; saveQuiet();
+        if(manual){ alert('すでに最新です。'); render(); }
+        return true;
+      }
+      if(mine && theirs){
+        const keepRemote = confirm(
+          'この端末とサーバーの、両方で記録が増えています。どちらかを残します。' +
+          '［OK］サーバーのを取り込む（この端末で増やした分は消えます）　' +
+          '［キャンセル］この端末のを送る（サーバーの分は消えます）');
+        if(!keepRemote) return syncPush(manual);
+      }
+      adopt(remote);
+      db.sync.last = stamp + ' 取り込み';
+      saveQuiet();
+      if(manual){ alert('サーバーのデータを取り込みました。'); }
+      render();
+      return true;
+    })
+    .catch(e => {
+      db.sync.last = stamp + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
+      saveQuiet();
+      if(manual){ alert('取り込めませんでした（' + (e === 403 ? 'あいことばが違います' : e || 'つながりません') + '）'); render(); }
+      return false;
+    });
+}
+
+/* 変えるたびに送る。連打しても1回にまとめる */
+let pushTimer = null;
+function schedulePush(){
+  if(!syncReady() || !db.sync.auto) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => syncPush(false), 2500);
+}
+const autoSend = () => schedulePush();
 
 /* ========== ストリーク ========== */
 function streak(){
@@ -531,7 +622,12 @@ function viewToday(){
     '<div class="ptpill">★ ' + balance() + ' pt</div>' +
     (st > 0 ? '<div class="streak">🔥 ' + st + '日つづいている</div>' : '') +
     (ptOn(ds) ? '<div class="sub">きょう +' + ptOn(ds) + '</div>' : '') +
-    '</div></div>';
+    '</div></div>' +
+    (syncReady()
+      ? '<div class="sub" style="margin:-8px 2px 12px;font-size:12px">' +
+        'この端末：' + esc(db.sync.device || '名前なし') +
+        (db.sync.last ? ' ・ ' + esc(db.sync.last) : ' ・ まだ同期していません') + '</div>'
+      : '');
 
   if(allDone) h += '<div class="praise">今日の分、ぜんぶ終わりました 🎉</div>';
 
@@ -976,21 +1072,28 @@ function viewRecords(){
     'color:var(--text);font-family:monospace"></textarea>' +
     '<div class="items">コピーできないときは、ここを長押しして選んでください。</div></div></div>';
 
-  // 自動で送る設定
+  // 同期の設定
   const sy = db.sync || {};
-  h += '<div class="card"><div class="card-top"><b>自動で送る</b></div>' +
-    '<div class="items" style="margin-bottom:10px">あずかり所を用意すると、' +
-    'やり終えるたびに自動でサイトが新しくなります。' +
-    'URLとあいことばはこのスマホの中だけに入り、書き出すデータには入りません。</div>' +
-    '<div class="field"><label>送信先のURL</label>' +
-    '<input data-sync="url" value="' + esc(sy.url || '') + '" placeholder="https://....workers.dev"></div>' +
+  h += '<h2>同期</h2>' +
+    '<div class="card"><div class="card-top"><b>この端末：' +
+    esc(sy.device || '名前なし') + '</b>' +
+    '<span class="tag' + (sy.last && sy.last.indexOf('失敗') < 0 ? ' ok' : '') + '">' +
+    esc(sy.last || 'まだ同期していません') + '</span></div>' +
+    '<div class="items" style="-webkit-line-clamp:none;display:block;margin-bottom:10px">' +
+    'あいことばを入れた端末どうしで、記録の中身がそろいます。' +
+    'スマホとパソコンで同じものが見られます。' +
+    'URL・あいことば・端末名は、この端末の中だけに入ります。</div>' +
+    '<div class="field"><label>この端末の名前</label>' +
+    '<input data-sync="device" value="' + esc(sy.device || '') + '" placeholder="スマホ／パソコン"></div>' +
+    '<div class="field"><label>あずかり所のURL</label>' +
+    '<input data-sync="url" value="' + esc(sy.url || '') + '"></div>' +
     '<div class="field"><label>あいことば</label>' +
     '<input type="password" data-sync="key" value="' + esc(sy.key || '') + '"></div>' +
     '<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:12px">' +
     '<input type="checkbox" data-sync="auto" style="width:20px;height:20px"' +
-    (sy.auto ? ' checked' : '') + '>やり終えるたびに自動で送る</label>' +
-    '<div class="btns"><button data-act="sendnow">今すぐ送る</button></div>' +
-    (sy.last ? '<div class="items" style="margin:10px 0 0">' + esc(sy.last) + '</div>' : '') +
+    (sy.auto ? ' checked' : '') + '>変えるたびに自動で送る</label>' +
+    '<div class="btns"><button class="primary" data-act="syncnow">いま同期する</button>' +
+    '<button data-act="sendnow">送るだけ</button></div>' +
     '</div>';
 
   // 最近の記録
@@ -1461,7 +1564,8 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return go('menus');
   }
 
-  if(act === 'sendnow') return sendSummary(true);
+  if(act === 'syncnow')  return syncPull(true);
+  if(act === 'sendnow')  return syncPush(true);
 
   // 書き出し
   if(act === 'export' || act === 'exportfile'){
@@ -1644,6 +1748,9 @@ document.getElementById('app').addEventListener('change', ev => {
 });
 
 render();
+
+// 開いたときに、あずかり所の方が新しければ取り込む
+if(syncReady()) setTimeout(() => syncPull(false), 300);
 
 // Chrome がインストールできると判断したら、今日の画面にボタンを出す
 window.addEventListener('beforeinstallprompt', ev => {
