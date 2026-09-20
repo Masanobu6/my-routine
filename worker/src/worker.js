@@ -49,8 +49,12 @@ const b64json = str => JSON.parse(new TextDecoder().decode(b64url(str)));
 async function verifyGoogle(idToken, clientId){
   const parts = String(idToken || '').split('.');
   if(parts.length !== 3) return null;
-  const head = b64json(parts[0]);
-  const body = b64json(parts[1]);
+  let head, body;
+  try {
+    head = b64json(parts[0]);
+    body = b64json(parts[1]);
+  } catch(e){ return null; }      // 形が壊れているものは、ここで捨てる
+  if(!head || !body) return null;
   const certs = await fetch(GOOGLE_JWKS).then(r => r.json());
   const jwk = (certs.keys || []).find(k => k.kid === head.kid);
   if(!jwk) return null;
@@ -109,7 +113,9 @@ export default {
     if(path === '/auth/google' && req.method === 'POST'){
       if(!env.GOOGLE_CLIENT_ID) return json({error:'Googleログインは未設定です'}, 501);
       let body; try { body = await req.json(); } catch(e){ return json({error:'読めません'}, 400); }
-      const claims = await verifyGoogle(body.idToken, env.GOOGLE_CLIENT_ID);
+      let claims = null;
+      try { claims = await verifyGoogle(body.idToken, env.GOOGLE_CLIENT_ID); }
+      catch(e){ return json({error:'確認中に問題が起きました'}, 401); }
       if(!claims) return json({error:'Googleの身分証を確認できませんでした'}, 401);
       const allow = (env.ALLOW_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
       if(allow.length && allow.indexOf(claims.email) < 0)

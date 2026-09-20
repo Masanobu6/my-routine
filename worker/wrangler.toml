@@ -3,6 +3,8 @@ main = "src/worker.js"
 compatibility_date = "2026-01-01"
 
 # もそもそ奮闘記と同じドメインの下に置く（Cloudflare が DNS も作る）
+# ※ 必ず [vars] より前に書くこと。あとに書くと vars の中身として読まれ、
+#   カスタムドメインが外れて workers.dev に出てしまう
 routes = [
   { pattern = "records.mosomoso-history.com", custom_domain = true }
 ]
@@ -11,3 +13,7 @@ routes = [
 [[kv_namespaces]]
 binding = "RECORDS"
 id = "7494fef09b5e4c9dbf151c23819b6b62"
+
+# 公開してよい値（秘密ではない）。あいことばと許可メールは secret 側
+[vars]
+GOOGLE_CLIENT_ID = "741461839274-i87gnanog6cqbqqqug5f9hgvvtaho7eg.apps.googleusercontent.com"
