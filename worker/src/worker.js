@@ -33,6 +33,40 @@ const json = (obj, status) =>
   reply(typeof obj === 'string' ? obj : JSON.stringify(obj), status || 200,
         {'content-type':'application/json; charset=utf-8', 'cache-control':'no-store'});
 
+/* ---- Google の身分証（IDトークン）を確かめる ----
+   署名を Google の公開鍵で検証し、宛先（aud）と有効期限と発行元を見る。
+   通ったら、その端末だけの長い合鍵を発行して KV に置く。            */
+const GOOGLE_JWKS = 'https://www.googleapis.com/oauth2/v3/certs';
+const b64url = str => {
+  const s2 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(s2 + '==='.slice((s2.length + 3) % 4));
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+const b64json = str => JSON.parse(new TextDecoder().decode(b64url(str)));
+
+async function verifyGoogle(idToken, clientId){
+  const parts = String(idToken || '').split('.');
+  if(parts.length !== 3) return null;
+  const head = b64json(parts[0]);
+  const body = b64json(parts[1]);
+  const certs = await fetch(GOOGLE_JWKS).then(r => r.json());
+  const jwk = (certs.keys || []).find(k => k.kid === head.kid);
+  if(!jwk) return null;
+  const key = await crypto.subtle.importKey('jwk',
+    {kty:jwk.kty, n:jwk.n, e:jwk.e, alg:'RS256', ext:true},
+    {name:'RSASSA-PKCS1-v1_5', hash:'SHA-256'}, false, ['verify']);
+  const okSig = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64url(parts[2]),
+    new TextEncoder().encode(parts[0] + '.' + parts[1]));
+  if(!okSig) return null;
+  if(body.aud !== clientId) return null;
+  if(body.iss !== 'accounts.google.com' && body.iss !== 'https://accounts.google.com') return null;
+  if((body.exp || 0) * 1000 < Date.now()) return null;
+  if(body.email_verified === false) return null;
+  return body;
+}
+
 const countRecords = d =>
   ['logs','spots','exercises','menus','rewards','redemptions']
     .reduce((n,k) => n + (Array.isArray(d && d[k]) ? d[k].length : 0), 0);
@@ -44,7 +78,13 @@ export default {
 
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
-    const ok = safeEqual(req.headers.get('x-key') || '', env.WRITE_KEY);
+    let ok = safeEqual(req.headers.get('x-key') || '', env.WRITE_KEY);
+    let who = ok ? 'あいことば' : null;
+    const tok = req.headers.get('x-token');
+    if(!ok && tok){
+      const rec = JSON.parse(await env.RECORDS.get('tok:' + tok) || 'null');
+      if(rec){ ok = true; who = rec.email; }
+    }
 
     /* ---- ブログ用の集計 ---- */
     if(path === '/'){
@@ -65,7 +105,26 @@ export default {
       return reply('だめ', 405);
     }
 
-    /* ---- ここから先はすべて、あいことばが要る ---- */
+    /* ---- Google で入る ---- */
+    if(path === '/auth/google' && req.method === 'POST'){
+      if(!env.GOOGLE_CLIENT_ID) return json({error:'Googleログインは未設定です'}, 501);
+      let body; try { body = await req.json(); } catch(e){ return json({error:'読めません'}, 400); }
+      const claims = await verifyGoogle(body.idToken, env.GOOGLE_CLIENT_ID);
+      if(!claims) return json({error:'Googleの身分証を確認できませんでした'}, 401);
+      const allow = (env.ALLOW_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
+      if(allow.length && allow.indexOf(claims.email) < 0)
+        return json({error:'このアカウントは許可されていません（' + claims.email + '）'}, 403);
+      const token = crypto.randomUUID() + '-' + crypto.randomUUID();
+      await env.RECORDS.put('tok:' + token,
+        JSON.stringify({email:claims.email, name:claims.name || '', at:Date.now()}));
+      return json({token, email:claims.email, name:claims.name || ''});
+    }
+    if(path === '/auth/me' && req.method === 'GET'){
+      if(!ok) return json({error:'入っていません'}, 403);
+      return json({who});
+    }
+
+    /* ---- ここから先はすべて、あいことばか端末トークンが要る ---- */
     if(!ok) return reply('あいことばが違う', 403);
 
     /* ---- 版の履歴 ---- */

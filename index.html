@@ -178,6 +178,16 @@ body.running #tabs{display:none}
 <body>
 <div id="app"></div>
 <input type="file" id="importfile" accept="application/json,.json" style="display:none">
+<div id="gsi" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);
+     align-items:center;justify-content:center;padding:24px">
+  <div style="background:var(--card);border-radius:16px;padding:22px;max-width:340px;width:100%;text-align:center">
+    <div style="font-weight:700;margin-bottom:6px">Googleで入る</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">
+      記録はこのアカウントにひもづきます。</div>
+    <div id="gsibtn" style="display:flex;justify-content:center;min-height:44px"></div>
+    <button id="gsicancel" style="margin-top:16px;color:var(--muted);font-size:14px;font-weight:600">やめる</button>
+  </div>
+</div>
 <nav id="tabs">
   <button data-tab="today"><span class="ic">☀</span>今日</button>
   <button data-tab="menus"><span class="ic">☰</span>メニュー</button>
@@ -190,7 +200,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.0';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.1';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -207,6 +217,8 @@ const catOf    = id => CATS.find(c => c.id === id) || CATS[CATS.length - 1];
 const catColor = id => COLORS[catOf(id).color];
 // 記録のあずかり所（worker/ を deploy したもの）。あいことばだけ自分で入れる
 const SYNC_URL = 'https://records.mosomoso-history.com';
+// Google ログインの宛先。空のあいだは、あいことば方式だけで動く
+const GOOGLE_CLIENT_ID = '';
 
 const uid = () => Math.random().toString(36).slice(2,9);
 const pad = n => String(n).padStart(2,'0');
@@ -538,7 +550,9 @@ function mergeDb(mine, theirs){
 /* ===== 同期 =====
    あずかり所に「データ一式」と「ブログ用の集計」を置く。
    あいことばを入れた端末どうしで中身がそろう。                      */
-const syncReady = () => !!(db.sync && db.sync.url && db.sync.key);
+const syncReady = () => !!(db.sync && db.sync.url && (db.sync.key || db.sync.token));
+const authHead = () => db.sync.token ? {'x-token':db.sync.token} : {'x-key':db.sync.key || ''};
+const whoAmI = () => db.sync.email || db.sync.device || '名前なし';
 const dataUrl = () => db.sync.url.replace(/\/+$/, '') + '/data';
 const nowStamp = () => { const n = new Date(); return pad(n.getHours()) + ':' + pad(n.getMinutes()); };
 
@@ -554,7 +568,7 @@ function syncPush(manual, retry){
   if(!syncReady()) return Promise.resolve(false);
   const stamp2 = nowStamp();
   return fetch(dataUrl(), {method:'POST',
-      headers:{'content-type':'application/json', 'x-key':db.sync.key},
+      headers:Object.assign({'content-type':'application/json'}, authHead()),
       body:JSON.stringify({baseVersion:db.version || 0, data:dataPayload()})})
     .then(r => r.json().then(body => ({status:r.status, ok:r.ok, body})))
     .then(res => {
@@ -578,7 +592,7 @@ function syncPush(manual, retry){
       db.sync.last = stamp2 + ' 送信';
       saveQuiet();
       return fetch(db.sync.url, {method:'POST',
-        headers:{'content-type':'application/json', 'x-key':db.sync.key},
+        headers:Object.assign({'content-type':'application/json'}, authHead()),
         body:JSON.stringify(summary())}).catch(() => {});
     })
     .then(() => { if(manual){ alert('同期しました。'); render(); } return true; })
@@ -594,7 +608,7 @@ function syncPush(manual, retry){
 function syncPull(manual){
   if(!syncReady()){ if(manual) alert('あいことばを入れてください。'); return Promise.resolve(false); }
   const stamp2 = nowStamp();
-  return fetch(dataUrl(), {headers:{'x-key':db.sync.key}})
+  return fetch(dataUrl(), {headers:authHead()})
     .then(r => { if(!r.ok) throw r.status; return r.json(); })
     .then(remote => {
       const theirs = remote && remote.data;
@@ -631,6 +645,55 @@ function syncPull(manual){
         (e === 403 ? 'あいことばが違います' : 'つながりません') + '）'); render(); }
       return false;
     });
+}
+
+/* ===== Google で入る ===== */
+function googleLogin(){
+  if(!GOOGLE_CLIENT_ID){ alert('Googleログインはまだ設定されていません。'); return; }
+  const panel = document.getElementById('gsi');
+  panel.style.display = 'flex';
+  const start = () => {
+    try {
+      google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID, callback:onGoogle,
+                                     auto_select:false, cancel_on_tap_outside:true});
+      document.getElementById('gsibtn').innerHTML = '';
+      google.accounts.id.renderButton(document.getElementById('gsibtn'),
+        {theme:'outline', size:'large', shape:'pill', text:'signin_with', locale:'ja'});
+    } catch(e){
+      panel.style.display = 'none';
+      alert('Googleの画面を出せませんでした。');
+    }
+  };
+  if(window.google && google.accounts){ start(); return; }
+  const sc = document.createElement('script');
+  sc.src = 'https://accounts.google.com/gsi/client';
+  sc.async = true;
+  sc.onload = start;
+  sc.onerror = () => { panel.style.display = 'none'; alert('Googleに接続できませんでした。'); };
+  document.head.appendChild(sc);
+}
+function onGoogle(res){
+  document.getElementById('gsi').style.display = 'none';
+  fetch(db.sync.url.replace(/\/+$/, '') + '/auth/google', {method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({idToken:res.credential})})
+    .then(r => r.json().then(b => ({ok:r.ok, b})))
+    .then(({ok, b}) => {
+      if(!ok) throw b.error || 'だめでした';
+      db.sync.token = b.token;
+      db.sync.email = b.email;
+      saveQuiet();
+      render();
+      syncPull(true);
+    })
+    .catch(e => alert('入れませんでした（' + e + '）'));
+}
+function googleLogout(){
+  if(!confirm('このアカウントから出ます。この端末の記録は消えません。')) return;
+  delete db.sync.token;
+  delete db.sync.email;
+  saveQuiet();
+  render();
 }
 
 /* 変えるたびに送る。連打しても1回にまとめる */
@@ -685,7 +748,7 @@ function viewToday(){
     '</div></div>' +
     (syncReady()
       ? '<div class="sub" style="margin:-8px 2px 12px;font-size:12px">' +
-        'この端末：' + esc(db.sync.device || '名前なし') +
+        (db.sync.email ? esc(db.sync.email) : 'この端末：' + esc(db.sync.device || '名前なし')) +
         (db.sync.last ? ' ・ ' + esc(db.sync.last) : ' ・ まだ同期していません') + '</div>'
       : '');
 
@@ -1135,8 +1198,8 @@ function viewRecords(){
   // 同期の設定
   const sy = db.sync || {};
   h += '<h2>同期</h2>' +
-    '<div class="card"><div class="card-top"><b>この端末：' +
-    esc(sy.device || '名前なし') + '</b>' +
+    '<div class="card"><div class="card-top"><b>' +
+    (sy.email ? esc(sy.email) : 'この端末：' + esc(sy.device || '名前なし')) + '</b>' +
     '<span class="tag' + (sy.last && sy.last.indexOf('失敗') < 0 ? ' ok' : '') + '">' +
     esc(sy.last || 'まだ同期していません') + '</span></div>' +
     '<div class="items" style="-webkit-line-clamp:none;display:block;margin-bottom:10px">' +
@@ -1147,8 +1210,15 @@ function viewRecords(){
     '<input data-sync="device" value="' + esc(sy.device || '') + '" placeholder="スマホ／パソコン"></div>' +
     '<div class="field"><label>あずかり所のURL</label>' +
     '<input data-sync="url" value="' + esc(sy.url || '') + '"></div>' +
-    '<div class="field"><label>あいことば</label>' +
-    '<input type="password" data-sync="key" value="' + esc(sy.key || '') + '"></div>' +
+    (sy.token ? '' :
+      '<div class="field"><label>あいことば</label>' +
+      '<input type="password" data-sync="key" value="' + esc(sy.key || '') + '"></div>') +
+    (GOOGLE_CLIENT_ID
+      ? '<div class="btns" style="margin-bottom:12px">' +
+        (sy.token
+          ? '<button data-act="glogout">' + esc(sy.email || '') + ' から出る</button>'
+          : '<button data-act="glogin">Googleで入る</button>') + '</div>'
+      : '') +
     '<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:12px">' +
     '<input type="checkbox" data-sync="auto" style="width:20px;height:20px"' +
     (sy.auto ? ' checked' : '') + '>変えるたびに自動で送る</label>' +
@@ -1630,6 +1700,8 @@ document.getElementById('app').addEventListener('click', ev => {
   }
 
   if(act === 'import'){ document.getElementById('importfile').click(); return; }
+  if(act === 'glogin')   return googleLogin();
+  if(act === 'glogout')  return googleLogout();
   if(act === 'syncnow')  return syncPull(true);
   if(act === 'sendnow')  return syncPush(true);
 
@@ -1820,6 +1892,10 @@ document.getElementById('app').addEventListener('change', ev => {
     view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
     render();
   }
+});
+
+document.getElementById('gsicancel').addEventListener('click', () => {
+  document.getElementById('gsi').style.display = 'none';
 });
 
 document.getElementById('importfile').addEventListener('change', ev => {
