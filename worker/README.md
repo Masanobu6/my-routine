@@ -7,30 +7,27 @@
 
 中身は数字だけ。種目名やスポット作業の名前は入らない。
 
-## 立てる手順
+## 立ててある場所
 
-Cloudflare のアカウント（無料）が要る。
+**https://records.mosomoso-history.com**（2026-09-20 デプロイ）
 
-```bash
-cd C:/ClaudeCode/my-routine/worker
-npx wrangler login
-npx wrangler kv namespace create RECORDS
-```
+KV namespace `RECORDS` は作成ずみで、id は `wrangler.toml` に書いてある（これは秘密ではない）。
 
-出てきた `id` を `wrangler.toml` の `id = "ここにKVのidを入れる"` に貼る。つづけて:
+直したら:
 
 ```bash
-npx wrangler secret put WRITE_KEY
+cd C:/ClaudeCode/my-routine/worker && npx wrangler deploy
 ```
 
-あいことばを聞かれるので、自分で決めた長めの文字列を入れる（パスワード管理ソフトで作るとよい）。
-**このあいことばはリポジトリに書かない**。公開リポジトリなので、書くと誰でも見られる。
+## あいことば（自分で入れる）
 
 ```bash
-npx wrangler deploy
+cd C:/ClaudeCode/my-routine/worker && npx wrangler secret put WRITE_KEY
 ```
 
-`https://my-routine-records.<アカウント名>.workers.dev` が出る。これが送信先。
+聞かれたら、自分で決めた長めの文字列を入れる（パスワード管理ソフトで作るとよい）。
+入力は画面に出ない。**この値はリポジトリにも、チャットにも書かない**。公開リポジトリなので、
+書くと誰でも読めて、記録を上書きされる。
 
 ## アプリにつなぐ
 

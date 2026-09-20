@@ -5,4 +5,4 @@ compatibility_date = "2026-01-01"
 # npx wrangler kv namespace create RECORDS で作って、出てきた id をここに書く
 [[kv_namespaces]]
 binding = "RECORDS"
-id = "ここにKVのidを入れる"
+id = "7494fef09b5e4c9dbf151c23819b6b62"

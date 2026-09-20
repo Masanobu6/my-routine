@@ -188,7 +188,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '0.6';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '0.7';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -203,6 +203,8 @@ const CATS = [
 ];
 const catOf    = id => CATS.find(c => c.id === id) || CATS[CATS.length - 1];
 const catColor = id => COLORS[catOf(id).color];
+// 記録のあずかり所（worker/ を deploy したもの）。あいことばだけ自分で入れる
+const SYNC_URL = 'https://records.mosomoso-history.com';
 const MINI_RATE = 0.3;
 
 const uid = () => Math.random().toString(36).slice(2,9);
@@ -255,7 +257,7 @@ function seed(){
     ],
     redemptions:[],
     // 送信先とあいことばは、このスマホの中だけ。書き出すデータには入らない
-    sync:{url:'', key:'', auto:false}
+    sync:{url:SYNC_URL, key:'', auto:false}
   };
 }
 function load(){
@@ -267,6 +269,7 @@ function load(){
   if(!d.redemptions) d.redemptions = [];
   if(!d.spots) d.spots = [];
   if(!d.sync) d.sync = {url:'', key:'', auto:false};
+  if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
     if(typeof e.points !== 'number') e.points = 10;
     // カテゴリと目安の時間は後から足した。色から見当をつけ、分の種目は量をそのまま使う
