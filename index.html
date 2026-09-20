@@ -190,7 +190,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '1.7';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.0';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -223,40 +223,42 @@ let run = null;
 let installEvt = null;   // Chrome が「入れられる」と言ってきたら入る
 
 function seed(){
-  const ex = (name,unit,amount,cat,minutes) => ({id:uid(), name, unit, amount, cat, minutes});
-  const stretch = ex('ストレッチ','チェック',0,'muscle',5);
-  const squat   = ex('スクワット','回',30,'muscle',5);
-  const pushup  = ex('腕立て伏せ','回',20,'muscle',5);
-  const plank   = ex('プランク','秒',60,'muscle',2);
-  const words   = ex('英単語','個',20,'english',15);
-  const read    = ex('読書','分',15,'other',15);
+  // IDは固定。別の端末で初期データが作られても、同じものとして扱われる
+  const ex = (id,name,unit,amount,cat,minutes) => ({id:'seed-'+id, name, unit, amount, cat, minutes});
+  const stretch = ex('stretch','ストレッチ','チェック',0,'muscle',5);
+  const squat   = ex('squat','スクワット','回',30,'muscle',5);
+  const pushup  = ex('pushup','腕立て伏せ','回',20,'muscle',5);
+  const plank   = ex('plank','プランク','秒',60,'muscle',2);
+  const words   = ex('words','英単語','個',20,'english',15);
+  const read    = ex('read','読書','分',15,'other',15);
   return {
     exercises:[stretch,squat,pushup,plank,words,read],
     menus:[
-      {id:uid(), name:'朝メニュー', days:[0,1,2,3,4,5,6], time:'07:00', items:[
+      {id:'seed-morning', name:'朝メニュー', days:[0,1,2,3,4,5,6], time:'07:00', items:[
         {exerciseId:stretch.id, amount:0,  sets:1, rest:0},
         {exerciseId:squat.id,   amount:30, sets:1, rest:0},
         {exerciseId:read.id,    amount:15, sets:1, rest:0}]},
-      {id:uid(), name:'筋トレの日', days:[1,3,5], time:'19:00', items:[
+      {id:'seed-gym', name:'筋トレの日', days:[1,3,5], time:'19:00', items:[
         {exerciseId:pushup.id, amount:20, sets:3, rest:60},
         {exerciseId:squat.id,  amount:30, sets:2, rest:60},
         {exerciseId:plank.id,  amount:60, sets:1, rest:0}]},
-      {id:uid(), name:'夜の勉強', days:[0,1,2,3,4,5,6], time:'21:00', items:[
+      {id:'seed-night', name:'夜の勉強', days:[0,1,2,3,4,5,6], time:'21:00', items:[
         {exerciseId:words.id, amount:20, sets:1, rest:0}]}
     ],
     logs:[],
     spots:[
-      {id:uid(), name:'確定申告の書類をそろえる', cat:'finance', minutes:60,
+      {id:'seed-tax', name:'確定申告の書類をそろえる', cat:'finance', minutes:60,
        date:'', done:false}
     ],
     rewards:[
-      {id:uid(), name:'好きなラーメンを食べる', cost:60},
-      {id:uid(), name:'ゲーム1時間', cost:24},
-      {id:uid(), name:'マンガを1冊買う', cost:36}
+      {id:'seed-ramen', name:'好きなラーメンを食べる', cost:60},
+      {id:'seed-game', name:'ゲーム1時間', cost:24},
+      {id:'seed-manga', name:'マンガを1冊買う', cost:36}
     ],
     redemptions:[],
     // 送信先とあいことばは、この端末の中だけ。送るデータには入らない
     sync:{url:SYNC_URL, key:'', auto:false, device:''},
+    graves:[], version:0,
     // まっさらの状態は「この端末で変えた」に数えない。
     // でないと、初めての端末で必ず取り合いの確認が出てしまう
     updatedAt:0, syncedAt:0
@@ -277,6 +279,8 @@ function migrate(d){
   if(!d.sync.device) d.sync.device = '';
   if(typeof d.updatedAt !== 'number') d.updatedAt = Date.now();
   if(typeof d.syncedAt !== 'number') d.syncedAt = 0;
+  if(typeof d.version !== 'number') d.version = 0;
+  if(!Array.isArray(d.graves)) d.graves = [];
   d.logs.forEach(l => { if(l.mode === 'mini') l.mode = 'full'; });   // ミニ版は廃止した
   if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
@@ -487,6 +491,50 @@ function summary(){
 }
 
 /* 書き出したものを、あずかり所へ送る。失敗しても記録そのものは無事 */
+/* ===== 1件ずつのマージ =====
+   塊で上書きするのをやめる。レコードのIDで突き合わせ、
+   両方にあるものは新しい方、片方にしかないものは必ず残す。
+   消したものは「墓標」を送って伝える。                            */
+const LISTS = ['exercises','menus','logs','spots','rewards','redemptions'];
+const GRAVE_DAYS = 90;
+
+function stamp(rec){ rec.up = Date.now(); return rec; }
+function bury(id){
+  if(!id) return;
+  db.graves = db.graves || [];
+  db.graves = db.graves.filter(g => g.id !== id);
+  db.graves.push({id, at:Date.now()});
+}
+function purgeGraves(d){
+  const limit = Date.now() - GRAVE_DAYS * 86400000;
+  d.graves = (d.graves || []).filter(g => (g.at || 0) > limit);
+}
+
+function mergeDb(mine, theirs){
+  const graves = new Map();
+  [...(mine.graves || []), ...(theirs.graves || [])].forEach(g => {
+    graves.set(g.id, Math.max(graves.get(g.id) || 0, g.at || 0));
+  });
+  const out = {};
+  LISTS.forEach(k => {
+    const m = new Map();
+    (mine[k] || []).forEach(r => { if(r && r.id) m.set(r.id, r); });
+    (theirs[k] || []).forEach(r => {
+      if(!r || !r.id) return;
+      const cur = m.get(r.id);
+      if(!cur || (r.up || 0) > (cur.up || 0)) m.set(r.id, r);
+    });
+    // 消した時刻より後に書かれたものは生き残る（消したあとに作り直した場合）
+    out[k] = [...m.values()].filter(r => !(graves.has(r.id) && (r.up || 0) <= graves.get(r.id)));
+  });
+  out.graves = [...graves].map(([id, at]) => ({id, at}));
+  out.sync = mine.sync;
+  out.updatedAt = Math.max(mine.updatedAt || 0, theirs.updatedAt || 0);
+  out.version = mine.version || 0;
+  purgeGraves(out);
+  return out;
+}
+
 /* ===== 同期 =====
    あずかり所に「データ一式」と「ブログ用の集計」を置く。
    あいことばを入れた端末どうしで中身がそろう。                      */
@@ -498,85 +546,89 @@ const nowStamp = () => { const n = new Date(); return pad(n.getHours()) + ':' + 
 function dataPayload(){
   const c = Object.assign({}, db);
   delete c.sync;
+  delete c.version;     // 版はサーバーが持つ
   return c;
 }
-/* 取り込む。同期の設定はこの端末のものを残す */
-function adopt(remote){
-  try { localStorage.setItem(KEY + '.backup', JSON.stringify(db)); } catch(e){}
-  const keep = db.sync;
-  db = migrate(remote);
-  db.sync = keep;
-  db.syncedAt = db.updatedAt;
-  saveQuiet();
-}
 
-function syncPush(manual){
+function syncPush(manual, retry){
   if(!syncReady()) return Promise.resolve(false);
-  const stamp = nowStamp();
+  const stamp2 = nowStamp();
   return fetch(dataUrl(), {method:'POST',
       headers:{'content-type':'application/json', 'x-key':db.sync.key},
-      body:JSON.stringify(dataPayload())})
-    .then(r => {
-      if(!r.ok) throw r.status;
+      body:JSON.stringify({baseVersion:db.version || 0, data:dataPayload()})})
+    .then(r => r.json().then(body => ({status:r.status, ok:r.ok, body})))
+    .then(res => {
+      if(res.status === 409){
+        // 向こうが進んでいた。混ぜてから、もう一度だけ出す
+        if(retry) throw '409';
+        if(res.body && res.body.data){
+          db = mergeDb(db, res.body.data);
+          db.version = res.body.version || 0;
+          saveQuiet();
+          render();
+        } else {
+          db.version = res.body.version || 0;
+          saveQuiet();
+        }
+        return syncPush(manual, true);
+      }
+      if(!res.ok) throw res.status;
+      db.version = res.body.version;
       db.syncedAt = db.updatedAt;
-      db.sync.last = stamp + ' 送信';
+      db.sync.last = stamp2 + ' 送信';
       saveQuiet();
-      // ブログ用の集計も一緒に置きかえる
       return fetch(db.sync.url, {method:'POST',
         headers:{'content-type':'application/json', 'x-key':db.sync.key},
         body:JSON.stringify(summary())}).catch(() => {});
     })
-    .then(() => { if(manual){ alert('送りました。'); render(); } return true; })
+    .then(() => { if(manual){ alert('同期しました。'); render(); } return true; })
     .catch(e => {
-      db.sync.last = stamp + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
+      db.sync.last = stamp2 + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
       saveQuiet();
-      if(manual){ alert('送れませんでした（' + (e === 403 ? 'あいことばが違います' : e || 'つながりません') + '）'); render(); }
+      if(manual){ alert('同期できませんでした（' +
+        (e === 403 ? 'あいことばが違います' : e === '409' ? 'やり直してください' : 'つながりません') + '）'); render(); }
       return false;
     });
 }
 
 function syncPull(manual){
   if(!syncReady()){ if(manual) alert('あいことばを入れてください。'); return Promise.resolve(false); }
-  const stamp = nowStamp();
+  const stamp2 = nowStamp();
   return fetch(dataUrl(), {headers:{'x-key':db.sync.key}})
     .then(r => { if(!r.ok) throw r.status; return r.json(); })
     .then(remote => {
-      if(!remote || !Array.isArray(remote.logs)){
-        // まだ何も置かれていない。この端末のを置く
-        return syncPush(manual);
+      const theirs = remote && remote.data;
+      const ver = remote ? (remote.version || 0) : 0;
+      if(!theirs || !Array.isArray(theirs.logs)){
+        db.version = ver;
+        saveQuiet();
+        return syncPush(manual);          // 向こうが空。こちらを置く
       }
-      // 向こうが空で、こちらに記録があるなら、取り込まずに送る（事故防止）
-      if(!remote.logs.length && db.logs.length){
-        if(manual) alert('あずかり所が空だったので、この端末の記録を送りました。');
-        return syncPush(false).then(() => { render(); return true; });
+      const before = JSON.stringify(LISTS.map(k => (db[k] || []).length));
+      // 一度も触っていない端末は、初期データを持ちこまずに受け取るだけ
+      const untouched = !(db.updatedAt || 0);
+      if(untouched){
+        const keep = db.sync;
+        db = migrate(theirs);
+        db.sync = keep;
+      } else {
+        db = mergeDb(db, theirs);
       }
-      const mine   = (db.updatedAt || 0) > (db.syncedAt || 0);   // この端末で変えた
-      const theirs = (remote.updatedAt || 0) > (db.syncedAt || 0); // 向こうも変わった
-
-      if(!theirs){
-        if(mine) return syncPush(manual);
-        db.sync.last = stamp + ' 同期ずみ'; saveQuiet();
-        if(manual){ alert('すでに最新です。'); render(); }
-        return true;
-      }
-      if(mine && theirs){
-        const keepRemote = confirm(
-          'この端末とサーバーの、両方で記録が増えています。どちらかを残します。' +
-          '［OK］サーバーのを取り込む（この端末で増やした分は消えます）　' +
-          '［キャンセル］この端末のを送る（サーバーの分は消えます）');
-        if(!keepRemote) return syncPush(manual);
-      }
-      adopt(remote);
-      db.sync.last = stamp + ' 取り込み';
+      db.version = ver;
+      const after = JSON.stringify(LISTS.map(k => (db[k] || []).length));
+      db.sync.last = stamp2 + (before === after ? ' 同期ずみ' : ' 取り込み');
       saveQuiet();
-      if(manual){ alert('サーバーのデータを取り込みました。'); }
       render();
+      // 混ぜた結果が向こうと違うなら、こちらからも出す
+      if(before !== after || (db.updatedAt || 0) > (db.syncedAt || 0)) return syncPush(manual);
+      if(manual){ alert('すでに最新です。'); render(); }
       return true;
     })
     .catch(e => {
-      db.sync.last = stamp + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
+      db.sync.last = stamp2 + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
       saveQuiet();
-      if(manual){ alert('取り込めませんでした（' + (e === 403 ? 'あいことばが違います' : e || 'つながりません') + '）'); render(); }
+      if(manual){ alert('同期できませんでした（' +
+        (e === 403 ? 'あいことばが違います' : 'つながりません') + '）'); render(); }
       return false;
     });
 }
@@ -1245,8 +1297,9 @@ function finishSpot(complete){
   s.earned = already + base;
   if(complete){ s.done = true; s.doneDate = ds; }
 
-  db.logs.push({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
-                points:base + sb, minutes:mins, cat:s.cat, name:s.name, partial:!complete});
+  stamp(s);
+  db.logs.push(stamp({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
+                points:base + sb, minutes:mins, cat:s.cat, name:s.name, partial:!complete}));
 
   run.finished = true;
   run.gain = {total:base + sb, base, streakBonus:sb, mins, complete, spent:s.spent,
@@ -1330,13 +1383,13 @@ function finishRun(complete){
   run.gain = runPoints(complete);    // 消す前に数える。あとだと連続ボーナスが二重になる
   const old = logFor(ds, run.menuId);
   if(old) db.logs = db.logs.filter(l => l !== old);
-  db.logs.push({
+  db.logs.push(stamp({
     id: ds + '_' + run.menuId, date: ds, menuId: run.menuId,
     mode: complete ? 'full' : 'part',
     durationSec: run.durationSec, points: (run.awarded || 0) + run.gain.total,
     entries: run.queue.map(q => ({exerciseId:q.exerciseId, amount:q.amount * (q.setDone || 0),
                                  done:q.done, minutes:q.minutes * (q.setDone || 0)}))
-  });
+  }));
   save();
   autoSend();
   render();
@@ -1473,7 +1526,7 @@ document.getElementById('app').addEventListener('click', ev => {
   if(act === 'rest'){
     const ds = todayStr();
     db.logs = db.logs.filter(l => !(l.date === ds && l.menuId === id));
-    db.logs.push({id:ds + '_' + id, date:ds, menuId:id, mode:'rest'});
+    db.logs.push(stamp({id:ds + '_' + id, date:ds, menuId:id, mode:'rest'}));
     save(); return render();
   }
   if(act === 'undo'){
@@ -1483,6 +1536,7 @@ document.getElementById('app').addEventListener('click', ev => {
       alert('取り消すと、交換ずみのごほうびのぶんだけポイントが足りなくなります。\n先に「ごほうび」の交換履歴を消してください。');
       return;
     }
+    db.logs.filter(l => l.date === ds && l.menuId === id).forEach(l => bury(l.id));
     db.logs = db.logs.filter(l => !(l.date === ds && l.menuId === id));
     save(); return render();
   }
@@ -1496,6 +1550,7 @@ document.getElementById('app').addEventListener('click', ev => {
   }
   if(act === 'noinstall'){ installEvt = null; return render(); }
   if(act === 'dellog'){
+    bury(id);
     db.logs = db.logs.filter(l => l.id !== id);
     save(); return render();
   }
@@ -1562,12 +1617,14 @@ document.getElementById('app').addEventListener('click', ev => {
     const d = view.draft;
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
     if(!d.days.length){ alert('曜日を1つ以上えらんでください'); return; }
+    stamp(d);
     const old = menuById(d.id);
     if(old) db.menus[db.menus.indexOf(old)] = d; else db.menus.push(d);
     save(); return go('menus');
   }
   if(act === 'delmenu'){
     if(!confirm('このメニューを削除します。記録は残ります。')) return;
+    bury(view.draft.id);
     db.menus = db.menus.filter(m => m.id !== view.draft.id);
     save(); return go('menus');
   }
@@ -1614,12 +1671,14 @@ document.getElementById('app').addEventListener('click', ev => {
     if(!d.name.trim()){ alert('やることを書いてください'); return; }
     d.minutes = Math.max(0, Number(d.minutes) || 0);
     if(!d.date) d.date = '';
+    stamp(d);
     const old = spotById(d.id);
     if(old) db.spots[db.spots.indexOf(old)] = d; else db.spots.push(d);
     save(); return go('today');
   }
   if(act === 'delspot'){
     if(!confirm('このスポット作業を消しますか？')) return;
+    bury(view.draft.id);
     db.spots = db.spots.filter(s => s.id !== view.draft.id);
     save(); return go('today');
   }
@@ -1636,8 +1695,9 @@ document.getElementById('app').addEventListener('click', ev => {
     const base = Math.max(0, ptFromMin(total) - (s.earned || 0)) + COMPLETE_BONUS;
     s.spent = total; s.earned = (s.earned || 0) + base;
     s.done = true; s.doneDate = ds;
-    db.logs.push({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
-                  points:base + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name});
+    stamp(s);
+    db.logs.push(stamp({id:'spot_' + s.id + '_' + Date.now(), date:ds, spotId:s.id, mode:'spot',
+                  points:base + sb, minutes:s.minutes || 0, cat:s.cat, name:s.name}));
     save(); autoSend(); go('today');
     setTimeout(() => alert('+' + (base + sb) + 'pt'), 30);
     return;
@@ -1650,7 +1710,8 @@ document.getElementById('app').addEventListener('click', ev => {
       alert('取り消すと、交換ずみのごほうびのぶんだけポイントが足りなくなります。\n先に「ごほうび」の交換履歴を消してください。');
       return;
     }
-    s.done = false; delete s.doneDate; s.spent = 0; s.earned = 0;
+    s.done = false; delete s.doneDate; s.spent = 0; s.earned = 0; stamp(s);
+    db.logs.filter(l => l.spotId === s.id).forEach(l => bury(l.id));
     db.logs = db.logs.filter(l => l.spotId !== s.id);
     save(); return render();
   }
@@ -1670,12 +1731,14 @@ document.getElementById('app').addEventListener('click', ev => {
     const d = view.draft;
     if(!d.name.trim()){ alert('ごほうびを書いてください'); return; }
     d.cost = Math.max(1, Number(d.cost) || 1);
+    stamp(d);
     const old = db.rewards.find(r => r.id === d.id);
     if(old) db.rewards[db.rewards.indexOf(old)] = d; else db.rewards.push(d);
     save(); return go('rewards');
   }
   if(act === 'delreward'){
     if(!confirm('このごほうびを消しますか？')) return;
+    bury(view.draft.id);
     db.rewards = db.rewards.filter(r => r.id !== view.draft.id);
     save(); return go('rewards');
   }
@@ -1683,13 +1746,14 @@ document.getElementById('app').addEventListener('click', ev => {
     const r = db.rewards.find(x => x.id === id);
     if(!r || balance() < r.cost) return;
     if(!confirm(r.name + '\n' + r.cost + 'pt つかいます。交換しますか？')) return;
-    db.redemptions.push({id:uid(), date:todayStr(), rewardId:r.id, name:r.name, cost:r.cost});
+    db.redemptions.push(stamp({id:uid(), date:todayStr(), rewardId:r.id, name:r.name, cost:r.cost}));
     save(); render();
     alert('交換しました。たっぷり楽しんでください。');
     return;
   }
   if(act === 'delredeem'){
     if(!confirm('この交換を取り消して、ポイントを戻しますか？')) return;
+    bury(id);
     db.redemptions = db.redemptions.filter(r => r.id !== id);
     save(); return render();
   }
@@ -1709,6 +1773,7 @@ document.getElementById('app').addEventListener('click', ev => {
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
     d.amount  = Number(d.amount) || 0;
     d.minutes = Math.max(0, Number(d.minutes) || 0);
+    stamp(d);
     const old = exById(d.id);
     if(old) db.exercises[db.exercises.indexOf(old)] = d; else db.exercises.push(d);
     save(); return go('exercises');
@@ -1716,6 +1781,7 @@ document.getElementById('app').addEventListener('click', ev => {
   if(act === 'delex'){
     const used = db.menus.filter(m => m.items.some(it => it.exerciseId === view.draft.id));
     if(!confirm(used.length ? used.length + 'つのメニューから外れます。削除しますか？' : '削除しますか？')) return;
+    bury(view.draft.id);
     db.exercises = db.exercises.filter(e => e.id !== view.draft.id);
     db.menus.forEach(m => { m.items = m.items.filter(it => it.exerciseId !== view.draft.id); });
     save(); return go('exercises');
