@@ -200,7 +200,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.1';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.2';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -599,8 +599,7 @@ function syncPush(manual, retry){
     .catch(e => {
       db.sync.last = stamp2 + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
       saveQuiet();
-      if(manual){ alert('同期できませんでした（' +
-        (e === 403 ? 'あいことばが違います' : e === '409' ? 'やり直してください' : 'つながりません') + '）'); render(); }
+      if(manual){ alert(syncMsg(e)); render(); }
       return false;
     });
 }
@@ -641,10 +640,18 @@ function syncPull(manual){
     .catch(e => {
       db.sync.last = stamp2 + ' 失敗（' + (e === 403 ? 'あいことば' : e || 'つながらない') + '）';
       saveQuiet();
-      if(manual){ alert('同期できませんでした（' +
-        (e === 403 ? 'あいことばが違います' : 'つながりません') + '）'); render(); }
+      if(manual){ alert(syncMsg(e)); render(); }
       return false;
     });
+}
+
+function syncMsg(e){
+  if(e === 403) return 'あいことばが違います。';
+  if(e === 400) return 'アプリが古いようです。ページを再読み込みしてください。'
+              + '（Windowsなら Ctrl+Shift+R）';
+  if(e === '409') return '同時に書き込まれました。もう一度押してください。';
+  if(e === 413) return '記録が大きすぎて送れません。';
+  return '同期できませんでした（' + (e || 'つながりません') + '）';
 }
 
 /* ===== Google で入る ===== */
