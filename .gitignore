@@ -1,1 +1,5 @@
 .claude/settings.local.json
+
+# wrangler の作業用キャッシュ
+worker/.wrangler/
+.wrangler/
