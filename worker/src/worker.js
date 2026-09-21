@@ -24,7 +24,7 @@ const SHRINK_LIMIT = 0.5;     // これより減るときは force が要る
 
 const cors = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type,x-key',
+  'access-control-allow-headers': 'content-type,x-key,x-token',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
 };
 const reply = (body, status, extra) =>
