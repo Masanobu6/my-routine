@@ -173,11 +173,40 @@ body.running #tabs{display:none}
 .legend{font-size:11px;color:var(--muted);display:flex;gap:12px;margin:0 2px 4px}
 .legend span{display:flex;align-items:center;gap:4px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* 表紙。画像が無ければカテゴリの色に種類のアイコン */
+.cover{width:56px;height:56px;border-radius:14px;flex:none;display:flex;align-items:center;
+  justify-content:center;font-size:26px;font-weight:800;color:#fff;
+  background:linear-gradient(135deg,var(--c),color-mix(in srgb,var(--c) 55%,#000));
+  background-size:cover;background-position:center;box-shadow:0 2px 6px rgba(0,0,0,.12)}
+.cover.has span{display:none}
+.cover.sm{width:44px;height:44px;border-radius:11px;font-size:20px}
+.cover.xs{width:28px;height:28px;border-radius:8px;font-size:14px;box-shadow:none}
+.cover.xl{width:128px;height:128px;border-radius:26px;font-size:56px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 2px}
+.chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;
+  color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);text-decoration:none;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip.k{--c:var(--text)}
+.chip.link{--c:var(--muted)}
+.thumbs{display:flex;gap:5px;margin:2px 0 8px;flex-wrap:wrap}
+.coveredit{display:flex;align-items:center;gap:16px;margin:4px 2px 18px}
+.coveredit .cebtns{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0}
+.pill{padding:9px 16px;border-radius:999px;background:var(--accent);color:#fff;font-weight:700;font-size:14px}
+.pill.ghost{background:var(--card);color:var(--muted);border:1px solid var(--line)}
+.hint{font-size:12px;color:var(--muted);line-height:1.6}
+.cats button.kon{background:var(--text);color:var(--bg);border-color:transparent;font-weight:700}
+.minilink{color:var(--muted);font-size:12px;font-weight:600;padding:8px 2px 0;text-decoration:underline}
+.spot .grow{cursor:pointer}
+.spot.done .cover{filter:grayscale(1)}
+.rbody .cover{margin-bottom:12px}
+.rbody .chip.link{font-size:13px;padding:5px 12px;margin-top:6px}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <input type="file" id="importfile" accept="application/json,.json" style="display:none">
+<input type="file" id="imgfile" accept="image/*" style="display:none">
 <div id="gsi" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);
      align-items:center;justify-content:center;padding:24px">
   <div style="background:var(--card);border-radius:16px;padding:22px;max-width:340px;width:100%;text-align:center">
@@ -200,7 +229,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.3';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.4';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -215,6 +244,15 @@ const CATS = [
 ];
 const catOf    = id => CATS.find(c => c.id === id) || CATS[CATS.length - 1];
 const catColor = id => COLORS[catOf(id).color];
+// 種類（本・講座…）。最初からあるものはIDを固定し、自分で足したものも同期する
+const DEFAULT_KINDS = [
+  {id:'kind-book',     name:'本',         icon:'📖'},
+  {id:'kind-course',   name:'講座',       icon:'🎓'},
+  {id:'kind-app',      name:'アプリ',     icon:'📱'},
+  {id:'kind-original', name:'オリジナル', icon:'✏️'},
+  {id:'kind-other',    name:'その他',     icon:'📌'}
+];
+const kindOf = id => id ? (db.kinds || []).find(k => k.id === id) : null;
 // 記録のあずかり所（worker/ を deploy したもの）。あいことばだけ自分で入れる
 const SYNC_URL = 'https://records.mosomoso-history.com';
 // Google ログインの宛先。空のあいだは、あいことば方式だけで動く
@@ -268,6 +306,7 @@ function seed(){
       {id:'seed-manga', name:'マンガを1冊買う', cost:36}
     ],
     redemptions:[],
+    kinds:JSON.parse(JSON.stringify(DEFAULT_KINDS)),
     // 送信先とあいことばは、この端末の中だけ。送るデータには入らない
     sync:{url:SYNC_URL, key:'', auto:false, device:''},
     graves:[], version:0,
@@ -293,6 +332,7 @@ function migrate(d){
   if(typeof d.syncedAt !== 'number') d.syncedAt = 0;
   if(typeof d.version !== 'number') d.version = 0;
   if(!Array.isArray(d.graves)) d.graves = [];
+  if(!Array.isArray(d.kinds)) d.kinds = JSON.parse(JSON.stringify(DEFAULT_KINDS));
   d.logs.forEach(l => { if(l.mode === 'mini') l.mode = 'full'; });   // ミニ版は廃止した
   if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
@@ -507,7 +547,7 @@ function summary(){
    塊で上書きするのをやめる。レコードのIDで突き合わせ、
    両方にあるものは新しい方、片方にしかないものは必ず残す。
    消したものは「墓標」を送って伝える。                            */
-const LISTS = ['exercises','menus','logs','spots','rewards','redemptions'];
+const LISTS = ['exercises','menus','logs','spots','rewards','redemptions','kinds'];
 const GRAVE_DAYS = 90;
 
 function stamp(rec){ rec.up = Date.now(); return rec; }
@@ -631,6 +671,8 @@ function syncPull(manual){
       const after = JSON.stringify(LISTS.map(k => (db[k] || []).length));
       db.sync.last = stamp2 + (before === after ? ' 同期ずみ' : ' 取り込み');
       saveQuiet();
+      imgMissing.clear();
+      flushImgs();
       render();
       // 混ぜた結果が向こうと違うなら、こちらからも出す
       if(before !== after || (db.updatedAt || 0) > (db.syncedAt || 0)) return syncPush(manual);
@@ -821,22 +863,45 @@ function viewToday(){
 
 function spotRow(s, ds, later){
   const late = !s.done && s.date && s.date < ds;
-  const meta = [catOf(s.cat).name,
-                s.spent ? 'ここまで ' + minutesText(s.spent) + '／' + (s.earned || 0) + 'pt'
-                        : (s.minutes ? '目安 ' + minutesText(s.minutes) : '')]
+  const meta = [s.spent ? 'ここまで ' + minutesText(s.spent) + '／' + (s.earned || 0) + 'pt'
+                        : (s.minutes ? '目安 ' + minutesText(s.minutes) : ''),
+                late ? '<b style="color:var(--accent)">' + daysLate(s.date, ds) + '日すぎ</b>' : '',
+                later && s.date ? mdText(s.date) : '',
+                s.done && s.doneDate ? mdText(s.doneDate) + ' にやった' : '']
     .filter(Boolean).join(' ・ ');
-  return '<div class="spot' + (s.done ? ' done' : '') + '">' +
-    '<span class="dot" style="background:' + catColor(s.cat) + '"></span>' +
-    '<button class="grow" data-act="editspot" data-id="' + s.id + '" style="text-align:left">' +
-    '<div class="nm">' + esc(s.name) + '</div>' +
-    '<div class="meta">' + meta +
-      (late ? ' ・ <b style="color:var(--accent)">' + daysLate(s.date, ds) + '日すぎ</b>' : '') +
-      (later && s.date ? ' ・ ' + mdText(s.date) : '') +
-      (s.done && s.doneDate ? ' ・ ' + mdText(s.doneDate) + ' にやった' : '') + '</div></button>' +
+  return '<div class="spot' + (s.done ? ' done' : '') + '">' + cover(s) +
+    '<div class="grow" data-act="editspot" data-id="' + s.id + '">' +
+    '<div class="nm">' + esc(s.name) + '</div>' + chips(s) +
+    (meta ? '<div class="meta">' + meta + '</div>' : '') + '</div>' +
     (s.done
       ? '<button class="iconbtn" data-act="undospot" data-id="' + s.id + '">↩</button>'
       : '<button class="get" data-act="startspot" data-id="' + s.id + '">' +
         (s.spent ? 'つづき' : 'はじめる') + '</button>') +
+    '</div>';
+}
+/* 表紙・札（カテゴリ／種類／参考URL） */
+function cover(rec, size){
+  const k = kindOf(rec.kind);
+  return '<div class="cover' + (size ? ' ' + size : '') + '"' +
+    (rec.img ? ' data-img="' + esc(rec.img) + '"' : '') +
+    ' style="--c:' + catColor(rec.cat) + '"><span>' +
+    (k ? k.icon : esc(catOf(rec.cat).name.slice(0,1))) + '</span></div>';
+}
+const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : '';
+const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch(e){ return u; } };
+function urlChip(rec, label){
+  const u = safeUrl(rec.url);
+  if(!u) return '';
+  return '<a class="chip link" href="' + esc(u) + '" target="_blank" rel="noopener">🔗 ' +
+    esc(label || hostOf(u)) + '</a>';
+}
+// link=false のときは、ボタンの中に置くのでリンクにしない
+function chips(rec, link){
+  const k = kindOf(rec.kind), u = safeUrl(rec.url);
+  return '<div class="chips"><span class="chip" style="--c:' + catColor(rec.cat) + '">' +
+    catOf(rec.cat).name + '</span>' +
+    (k ? '<span class="chip k">' + k.icon + ' ' + esc(k.name) + '</span>' : '') +
+    (u ? (link === false ? '<span class="chip link">🔗 ' + esc(hostOf(u)) + '</span>' : urlChip(rec)) : '') +
     '</div>';
 }
 const mdText = ds => { const d = parseDate(ds); return (d.getMonth()+1) + '/' + d.getDate(); };
@@ -856,6 +921,8 @@ function menuCard(m, ds, other){
                   : '✓ 完了') + (log.points ? ' +' + log.points + 'pt' : ''))
            : (other ? '' : m.time || '')) +
     '</span></div>' +
+    (m.items.length ? '<div class="thumbs">' + m.items.map(it => exById(it.exerciseId))
+        .filter(Boolean).map(e => cover(e, 'xs')).join('') + '</div>' : '') +
     '<div class="items">' + esc(desc) + '</div>' +
     (!log && m.items.length ? '<div class="items" style="margin-bottom:10px">やりきると <b style="color:var(--accent)">+' +
       menuPoints(m) + 'pt</b></div>' : '') +
@@ -909,7 +976,7 @@ function viewMenuEdit(){
     const e = exById(it.exerciseId);
     if(!e) return;
     h += '<div class="mitem"><div class="mhead">' +
-      '<span class="dot" style="background:' + catColor(e.cat) + '"></span>' +
+      cover(e, 'xs') +
       '<div class="grow"><div class="nm">' + esc(e.name) + '</div></div>' +
       '<button class="iconbtn" data-act="itemup" data-i="' + i + '">↑</button>' +
       '<button class="iconbtn" data-act="itemdel" data-i="' + i + '">✕</button></div>' +
@@ -940,10 +1007,9 @@ function viewExercises(){
     'メニューに入れる部品です。同じ種目を複数のメニューで使えます。</div>';
   db.exercises.forEach(e => {
     const used = db.menus.filter(m => m.items.some(it => it.exerciseId === e.id)).length;
-    h += '<button class="row" data-act="editex" data-id="' + e.id + '">' +
-      '<span class="dot" style="background:' + catColor(e.cat) + '"></span>' +
-      '<div><div class="name">' + esc(e.name) + '</div>' +
-      '<div class="meta">' + catOf(e.cat).name + ' ・ ' +
+    h += '<button class="row" data-act="editex" data-id="' + e.id + '">' + cover(e, 'sm') +
+      '<div style="min-width:0"><div class="name">' + esc(e.name) + '</div>' + chips(e, false) +
+      '<div class="meta">' +
       (amountText(e.amount, e.unit) || 'チェックするだけ') +
       (e.minutes ? ' ・ ' + minutesText(e.minutes) : '') +
       ' ・ ' + ptFromMin(e.minutes) + 'pt' +
@@ -956,6 +1022,7 @@ function viewExercises(){
 function viewExEdit(){
   const e = view.draft;
   let h = '<div class="wrap"><button class="back" data-act="tab" data-tab="exercises">‹ 種目</button>' +
+    coverEditor(e) +
     '<div class="field"><label>名前</label>' +
     '<input data-field="name" value="' + esc(e.name) + '" placeholder="腕立て伏せ"></div>' +
     '<div class="field"><div class="inline">' +
@@ -964,7 +1031,7 @@ function viewExEdit(){
   h += '</select></div><div style="flex:1"><label>ふだんの量</label>' +
     '<input inputmode="numeric" data-field="amount" value="' + e.amount + '"' +
     (e.unit === 'チェック' ? ' disabled' : '') + '></div></div></div>' +
-    catPicker(e.cat) +
+    kindPicker(e.kind) + catPicker(e.cat) + urlField(e) +
     '<div class="field"><label>かかる時間（分）</label>' +
     '<input inputmode="numeric" data-field="minutes" value="' + e.minutes + '">' +
     '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
@@ -978,6 +1045,36 @@ function viewExEdit(){
   return h;
 }
 
+/* 編集画面：表紙・種類・参考URL（スポット作業と種目で共通） */
+function coverEditor(d){
+  return '<div class="coveredit">' + cover(d, 'xl') + '<div class="cebtns">' +
+    '<button class="pill" data-act="pickimg">' + (d.img ? '画像を変える' : '画像をえらぶ') + '</button>' +
+    (d.img ? '<button class="pill ghost" data-act="removeimg">画像を外す</button>' : '') +
+    '<div class="hint">本の表紙や講座のサムネなど。<br>パソコンは Ctrl+V で貼りつけもできます。</div>' +
+    '</div></div>';
+}
+function kindPicker(sel){
+  let h = '<div class="field"><label>種類</label><div class="cats">';
+  (db.kinds || []).forEach(k => {
+    h += '<button class="' + (sel === k.id ? 'kon' : '') + '" data-act="kind" data-k="' + k.id + '">' +
+         k.icon + ' ' + esc(k.name) + '</button>';
+  });
+  h += '<button data-act="addkind" style="border-style:dashed;color:var(--muted)">＋ 追加</button></div>';
+  const cur = kindOf(sel);
+  if(cur && !DEFAULT_KINDS.some(k => k.id === cur.id)){
+    h += '<button class="minilink" data-act="delkind" data-k="' + cur.id + '">「' + esc(cur.name) +
+         '」を選択肢から消す</button>';
+  }
+  return h + '</div>';
+}
+function urlField(d){
+  return '<div class="field"><label>参考URL（本や講座のページなど）</label>' +
+    '<input type="url" inputmode="url" data-field="url" value="' + esc(d.url || '') +
+    '" placeholder="https://">' +
+    (safeUrl(d.url) ? '<div style="margin-top:6px">' + urlChip(d, hostOf(d.url) + ' を開く') + '</div>' : '') +
+    '</div>';
+}
+
 /* ========== 画面：スポット作業の編集 ========== */
 function catPicker(sel){
   return '<div class="field"><label>カテゴリ</label><div class="cats">' +
@@ -989,9 +1086,10 @@ function catPicker(sel){
 function viewSpotEdit(){
   const s = view.draft;
   return '<div class="wrap"><button class="back" data-act="tab" data-tab="today">‹ 今日</button>' +
+    coverEditor(s) +
     '<div class="field"><label>やること</label>' +
     '<input data-field="name" value="' + esc(s.name) + '" placeholder="確定申告の書類をそろえる"></div>' +
-    catPicker(s.cat) +
+    kindPicker(s.kind) + catPicker(s.cat) + urlField(s) +
     '<div class="field"><label>目安の時間（分・わからなければ空でいい）</label>' +
     '<input inputmode="numeric" data-field="minutes" value="' + (s.minutes || '') + '">' +
     '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
@@ -1507,9 +1605,11 @@ function viewRun(){
     '<span id="elapsed">' + mmss(runElapsed()) + (run.running ? '' : ' ⏸') + '</span></div>' +
     '<div class="prog"><i style="width:' + pct + '%"></i></div>' +
     '<div class="rbody">' +
+    (exById(it.exerciseId) ? cover(exById(it.exerciseId), 'xl') : '') +
     '<div class="nm">' + esc(it.name) + '</div>' +
     '<div class="amt">' + amt + unit + '</div>' +
     (it.sets > 1 ? '<div class="set">セット ' + (it.setDone + 1) + ' / ' + it.sets + '</div>' : '') +
+    (exById(it.exerciseId) ? urlChip(exById(it.exerciseId), '参考ページを開く') : '') +
     '</div><div class="rbtns">' +
     (run.running ? '<button class="primary" data-act="doneset">できた</button>'
                  : '<button class="primary" data-act="resume">再開する</button>') +
@@ -1548,9 +1648,10 @@ function viewRunSpot(){
     '<button class="stop" data-act="abort">やめる</button>' +
     '<span class="mid">' + catOf(s.cat).name +
     (s.spent ? ' ・ ここまで ' + minutesText(s.spent) : '') + '</span></div>' +
-    '<div class="rbody"><div class="nm">' + esc(s.name) + '</div>' +
+    '<div class="rbody">' + cover(s, 'xl') + '<div class="nm">' + esc(s.name) + '</div>' +
     '<div class="cd' + (paused ? ' paused' : '') + '" id="elapsed">' + mmss(runElapsed()) + '</div>' +
-    '<div class="set">' + (paused ? '一時停止中' : '5分で1ポイント') + '</div></div>' +
+    '<div class="set">' + (paused ? '一時停止中' : '5分で1ポイント') + '</div>' +
+    urlChip(s, '参考ページを開く') + '</div>' +
     '<div class="rbtns">' +
     (paused ? '<button class="primary" data-act="resume">再開する</button>'
             : '<button class="primary" data-act="spotdone">おわり</button>') +
@@ -1558,6 +1659,121 @@ function viewRunSpot(){
     (paused ? '<button data-act="spotdone">おわり</button>'
             : '<button data-act="pause">一時停止</button>') +
     '<button data-act="spotpart">途中まで</button></div></div></div>';
+}
+
+/* ========== 表紙画像 ==========
+   画像は同期データに入れない（重くなって上限に当たるため）。
+   データにはIDだけを持たせ、中身は端末の IndexedDB と、あずかり所の /img/<id> に置く。
+   別の端末は、IDを見て足りない画像をあずかり所から取ってくる。            */
+const IMGQ = 'myroutine.imgq';            // まだ送れていない画像のID
+const imgUrls = new Map(), imgBusy = new Set(), imgMissing = new Set();
+let idbP = null;
+function idb(){
+  return idbP || (idbP = new Promise((res, rej) => {
+    const r = indexedDB.open('myroutine-img', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('img');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+}
+function idbDo(mode, fn){
+  return idb().then(d => new Promise((res, rej) => {
+    const t = d.transaction('img', mode), q = fn(t.objectStore('img'));
+    t.oncomplete = () => res(q && q.result);
+    t.onerror = () => rej(t.error);
+  }));
+}
+const imgGet = id => idbDo('readonly', st => st.get(id));
+const imgPut = (id, blob) => idbDo('readwrite', st => st.put(blob, id));
+const imgBase = () => db.sync.url.replace(/\/+$/, '') + '/img/';
+
+function paintImgs(){
+  document.querySelectorAll('[data-img]').forEach(el => {
+    const u = imgUrls.get(el.dataset.img);
+    if(u){ el.style.backgroundImage = 'url(' + u + ')'; el.classList.add('has'); }
+    else loadImg(el.dataset.img);
+  });
+}
+function loadImg(id){
+  if(imgUrls.has(id) || imgBusy.has(id) || imgMissing.has(id)) return;
+  imgBusy.add(id);
+  imgGet(id)
+    .then(b => b || (syncReady()
+      ? fetch(imgBase() + id, {headers:authHead()})
+          .then(r => r.ok ? r.blob() : null)
+          .then(b2 => { if(b2) imgPut(id, b2).catch(() => {}); return b2; })
+      : null))
+    .then(b => {
+      imgBusy.delete(id);
+      if(!b){ imgMissing.add(id); return; }
+      imgUrls.set(id, URL.createObjectURL(b));
+      paintImgs();
+    })
+    .catch(() => { imgBusy.delete(id); imgMissing.add(id); });
+}
+/* 長い辺を800pxまでに縮める。WebP が作れなければ JPEG */
+function shrinkImage(file){
+  return createImageBitmap(file).then(bm => {
+    const r = Math.min(1, 800 / Math.max(bm.width, bm.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bm.width * r);
+    c.height = Math.round(bm.height * r);
+    c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height);
+    return new Promise(res => c.toBlob(res, 'image/webp', .82))
+      .then(b => b && b.type === 'image/webp' ? b : new Promise(res => c.toBlob(res, 'image/jpeg', .85)));
+  });
+}
+function takeImage(file){
+  if(!file || !view.draft) return;
+  shrinkImage(file)
+    .then(blob => {
+      const id = 'im-' + (crypto.randomUUID ? crypto.randomUUID() : uid() + uid() + uid());
+      return imgPut(id, blob).then(() => {
+        imgUrls.set(id, URL.createObjectURL(blob));
+        if(view.draft){ view.draft.img = id; render(); }
+      });
+    })
+    .catch(() => alert('この画像は読めませんでした。'));
+}
+/* 保存するとき：新しい画像は送り、使わなくなった画像は片づける */
+function settleImg(old, d){
+  const before = old && old.img;
+  if(d.img && d.img !== before) queueImg(d.img);
+  if(before && before !== d.img) dropImg(before);
+}
+const imgQueue = () => { try { return JSON.parse(localStorage.getItem(IMGQ) || '[]'); } catch(e){ return []; } };
+const setImgQueue = q => { try { localStorage.setItem(IMGQ, JSON.stringify(q)); } catch(e){} };
+function queueImg(id){
+  const q = imgQueue();
+  if(!q.includes(id)) q.push(id);
+  setImgQueue(q);
+  setTimeout(flushImgs, 0);
+}
+let flushing = false;
+function flushImgs(){
+  if(flushing || !syncReady()) return;
+  const id = imgQueue()[0];
+  if(!id) return;
+  flushing = true;
+  imgGet(id)
+    .then(b => b && fetch(imgBase() + id, {method:'PUT',
+        headers:Object.assign({'content-type':b.type || 'image/jpeg'}, authHead()), body:b})
+      .then(r => { if(!r.ok) throw r.status; }))
+    .then(() => { setImgQueue(imgQueue().filter(x => x !== id)); flushing = false; flushImgs(); })
+    .catch(() => { flushing = false; });       // つながらなければ、次の同期のときにまた送る
+}
+function dropImg(id){
+  if(!id) return;
+  setImgQueue(imgQueue().filter(x => x !== id));
+  idbDo('readwrite', st => st.delete(id)).catch(() => {});
+  const u = imgUrls.get(id);
+  if(u){ URL.revokeObjectURL(u); imgUrls.delete(id); }
+  if(syncReady()) fetch(imgBase() + id, {method:'DELETE', headers:authHead()}).catch(() => {});
+}
+function normUrl(u){
+  u = String(u || '').trim();
+  if(u && !/^https?:\/\//i.test(u) && /\./.test(u)) u = 'https://' + u;
+  return u;
 }
 
 /* ========== 描画 ========== */
@@ -1575,6 +1791,7 @@ function render(){
   else if(view.name === 'rewardEdit') h = viewRewardEdit();
   else if(view.name === 'records') h = viewRecords();
   app.innerHTML = h;
+  paintImgs();
   const tabName = view.name === 'menuEdit' ? 'menus' :
                   view.name === 'exEdit' ? 'exercises' :
                   view.name === 'rewardEdit' ? 'rewards' :
@@ -1592,6 +1809,7 @@ document.getElementById('tabs').addEventListener('click', ev => {
 });
 
 document.getElementById('app').addEventListener('click', ev => {
+  if(ev.target.closest('a[href]')) return;     // 参考URLのリンクは、そのまま開く
   const b = ev.target.closest('[data-act]');
   if(!b) return;
   const act = b.dataset.act, id = b.dataset.id;
@@ -1750,6 +1968,8 @@ document.getElementById('app').addEventListener('click', ev => {
     if(!d.name.trim()){ alert('やることを書いてください'); return; }
     d.minutes = Math.max(0, Number(d.minutes) || 0);
     if(!d.date) d.date = '';
+    d.url = normUrl(d.url);
+    settleImg(spotById(d.id), d);
     stamp(d);
     const old = spotById(d.id);
     if(old) db.spots[db.spots.indexOf(old)] = d; else db.spots.push(d);
@@ -1758,6 +1978,8 @@ document.getElementById('app').addEventListener('click', ev => {
   if(act === 'delspot'){
     if(!confirm('このスポット作業を消しますか？')) return;
     bury(view.draft.id);
+    dropImg((spotById(view.draft.id) || {}).img);
+    if(view.draft.img) dropImg(view.draft.img);
     db.spots = db.spots.filter(s => s.id !== view.draft.id);
     save(); return go('today');
   }
@@ -1795,6 +2017,34 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return render();
   }
   if(act === 'cat'){ view.draft.cat = b.dataset.c; return render(); }
+  if(act === 'kind'){
+    view.draft.kind = view.draft.kind === b.dataset.k ? '' : b.dataset.k;   // もう一度押すと外れる
+    return render();
+  }
+  if(act === 'addkind'){
+    const name = (prompt('種類の名前（例：動画、資格、ポッドキャスト）') || '').trim();
+    if(!name) return;
+    let k = (db.kinds || []).find(x => x.name === name);
+    if(!k){
+      k = stamp({id:'k-' + uid(), name, icon:'🏷️'});
+      db.kinds.push(k);
+      save();
+    }
+    view.draft.kind = k.id;
+    return render();
+  }
+  if(act === 'delkind'){
+    const k = kindOf(b.dataset.k);
+    if(!k) return;
+    if(!confirm('「' + k.name + '」を選択肢から消します。この種類が付いているタスクは、種類なしになります。')) return;
+    bury(k.id);
+    db.kinds = db.kinds.filter(x => x.id !== k.id);
+    [...db.spots, ...db.exercises].forEach(r => { if(r.kind === k.id){ r.kind = ''; stamp(r); } });
+    if(view.draft.kind === k.id) view.draft.kind = '';
+    save(); return render();
+  }
+  if(act === 'pickimg'){ document.getElementById('imgfile').click(); return; }
+  if(act === 'removeimg'){ view.draft.img = ''; return render(); }
   if(act === 'cleardate'){ view.draft.date = ''; return render(); }
 
   // ごほうび
@@ -1852,6 +2102,8 @@ document.getElementById('app').addEventListener('click', ev => {
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
     d.amount  = Number(d.amount) || 0;
     d.minutes = Math.max(0, Number(d.minutes) || 0);
+    d.url = normUrl(d.url);
+    settleImg(exById(d.id), d);
     stamp(d);
     const old = exById(d.id);
     if(old) db.exercises[db.exercises.indexOf(old)] = d; else db.exercises.push(d);
@@ -1861,6 +2113,8 @@ document.getElementById('app').addEventListener('click', ev => {
     const used = db.menus.filter(m => m.items.some(it => it.exerciseId === view.draft.id));
     if(!confirm(used.length ? used.length + 'つのメニューから外れます。削除しますか？' : '削除しますか？')) return;
     bury(view.draft.id);
+    dropImg((exById(view.draft.id) || {}).img);
+    if(view.draft.img) dropImg(view.draft.img);
     db.exercises = db.exercises.filter(e => e.id !== view.draft.id);
     db.menus.forEach(m => { m.items = m.items.filter(it => it.exerciseId !== view.draft.id); });
     save(); return go('exercises');
@@ -1895,10 +2149,25 @@ document.getElementById('app').addEventListener('change', ev => {
     saveQuiet();
     return;
   }
+  if(t.dataset.field === 'url' && view.draft){ view.draft.url = normUrl(t.value); render(); return; }
   if(t.dataset.act === 'additem' && t.value){
     view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
     render();
   }
+});
+
+document.getElementById('imgfile').addEventListener('change', ev => {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  takeImage(f);
+});
+// パソコンでは Ctrl+V で画像を貼りつけられる（編集画面のときだけ）
+document.addEventListener('paste', ev => {
+  if(!view.draft || (view.name !== 'spotEdit' && view.name !== 'exEdit')) return;
+  const it = [...((ev.clipboardData && ev.clipboardData.items) || [])].find(x => x.type.startsWith('image/'));
+  if(!it) return;
+  ev.preventDefault();
+  takeImage(it.getAsFile());
 });
 
 document.getElementById('gsicancel').addEventListener('click', () => {

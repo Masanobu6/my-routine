@@ -10,6 +10,8 @@
  *                   版が食い違えば 409 と最新を返す。呼び手が混ぜて出し直す
  *   GET  /history … 直近の版の一覧（あいことばが要る）
  *   GET  /history?v=3 … その版の中身を返す
+ *   GET/PUT/DELETE /img/<id> … タスクの表紙画像（あいことばが要る）
+ *                   データ本体には画像のIDだけを持たせ、中身はここに別に置く
  *
  * 大事なのは3つ。
  *   - 版を見ずに上書きできない（409）
@@ -21,11 +23,12 @@ const EMPTY_SUM = '{"generated":"","streak":0,"bestStreak":0,"level":1,"points":
 const MAX = 2 * 1024 * 1024;
 const KEEP = 20;              // 残す版の数
 const SHRINK_LIMIT = 0.5;     // これより減るときは force が要る
+const IMG_MAX = 1.5 * 1024 * 1024;   // 画像1枚の上限。アプリ側で縮めてから送る
 
 const cors = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type,x-key,x-token',
-  'access-control-allow-methods': 'GET,POST,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
 };
 const reply = (body, status, extra) =>
   new Response(body, {status, headers:Object.assign({}, cors, extra)});
@@ -142,6 +145,32 @@ export default {
       }
       const list = JSON.parse(await env.RECORDS.get('histlist') || '[]');
       return json({versions:list});
+    }
+
+    /* ---- 表紙画像 ---- */
+    const im = path.match(/^\/img\/([A-Za-z0-9_-]{8,80})$/);
+    if(im){
+      const key = 'img:' + im[1];
+      if(req.method === 'GET'){
+        const got = await env.RECORDS.getWithMetadata(key, 'arrayBuffer');
+        if(!got || !got.value) return reply('その画像はありません', 404);
+        return reply(got.value, 200, {
+          'content-type':(got.metadata && got.metadata.type) || 'image/jpeg',
+          'cache-control':'private, max-age=31536000, immutable'});
+      }
+      if(req.method === 'PUT'){
+        const type = (req.headers.get('content-type') || '').split(';')[0].trim();
+        if(!/^image\/(jpeg|png|webp)$/.test(type)) return reply('画像ではない', 415);
+        const buf = await req.arrayBuffer();
+        if(buf.byteLength > IMG_MAX) return reply('大きすぎる', 413);
+        await env.RECORDS.put(key, buf, {metadata:{type}});
+        return json({ok:true});
+      }
+      if(req.method === 'DELETE'){
+        await env.RECORDS.delete(key);
+        return json({ok:true});
+      }
+      return reply('だめ', 405);
     }
 
     /* ---- データ一式 ---- */
