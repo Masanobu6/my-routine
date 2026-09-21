@@ -11,6 +11,7 @@
  *   GET  /history … 直近の版の一覧（あいことばが要る）
  *   GET  /history?v=3 … その版の中身を返す
  *   GET/PUT/DELETE /img/<id> … タスクの表紙画像（あいことばが要る）
+ *   POST /og      … body: { url }。そのページの紹介画像（og:image）を探して、画像そのものを返す
  *                   データ本体には画像のIDだけを持たせ、中身はここに別に置く
  *
  * 大事なのは3つ。
@@ -72,6 +73,83 @@ async function verifyGoogle(idToken, clientId){
   if((body.exp || 0) * 1000 < Date.now()) return null;
   if(body.email_verified === false) return null;
   return body;
+}
+
+/* ---- 参考URLから表紙を探す ----
+   ブラウザは他のサイトを直接読めない（CORS）ので、ここで代わりに読む。
+   1) Amazon は商品番号（ASIN）から商品画像のURLが決まるので、ページを読まずに取る
+   2) ほかは、ページの og:image / twitter:image / image_src を見る
+   3) URL が画像そのものなら、それを使う                                  */
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+           '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+const PAGE_MAX = 1500000;          // HTML はここまでしか読まない
+const COVER_MAX = 6 * 1024 * 1024; // 表紙の元画像の上限。アプリ側で縮める
+const SHORT_HOSTS = ['amzn.asia', 'amzn.to', 'a.co'];
+
+const unent = s => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+                    .replace(/&#x2F;/gi, '/').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+const attr = (tag, name) => {
+  const m = tag.match(new RegExp('\\s' + name + '\\s*=\\s*("([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i'));
+  return m ? unent(m[2] ?? m[3] ?? m[4] ?? '') : '';
+};
+
+function coverFromHtml(html, base){
+  const want = ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src'];
+  const found = {};
+  for(const tag of html.match(/<meta\b[^>]*>/gi) || []){
+    const key = (attr(tag, 'property') || attr(tag, 'name')).toLowerCase();
+    const val = attr(tag, 'content');
+    if(want.includes(key) && val && !found[key]) found[key] = val;
+  }
+  let pick = want.map(k => found[k]).find(Boolean);
+  if(!pick){
+    const link = (html.match(/<link\b[^>]*rel\s*=\s*["']?image_src[^>]*>/i) || [])[0];
+    if(link) pick = attr(link, 'href');
+  }
+  if(!pick){
+    // Amazon の商品ページ内の大きい画像
+    const m = html.match(/data-old-hires\s*=\s*"(https:[^"]+)"/) || html.match(/"hiRes"\s*:\s*"(https:[^"]+)"/);
+    if(m) pick = m[1];
+  }
+  if(!pick) return null;
+  try { return new URL(pick, base).href; } catch(e){ return null; }
+}
+
+async function getImage(src, referer){
+  const h = {'user-agent':UA, 'accept':'image/avif,image/webp,image/*,*/*;q=0.8'};
+  if(referer) h.referer = referer;
+  const r = await fetch(src, {redirect:'follow', headers:h});
+  const ct = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if(!r.ok || !ct.startsWith('image/') || ct === 'image/svg+xml') return null;
+  const buf = await r.arrayBuffer();
+  if(buf.byteLength < 200 || buf.byteLength > COVER_MAX) return null;   // 1px の目印画像などは捨てる
+  return {buf, type:ct, src};
+}
+
+async function fetchCover(pageUrl){
+  let u = new URL(pageUrl);
+  const page = {'user-agent':UA, 'accept':'text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.8',
+                'accept-language':'ja,en;q=0.8'};
+  // 短縮URLは、行き先を先に確かめる
+  if(SHORT_HOSTS.includes(u.hostname)){
+    const r = await fetch(u.href, {redirect:'follow', headers:page});
+    u = new URL(r.url);
+  }
+  if(/(^|\.)amazon\./.test(u.hostname)){
+    const asin = (u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|ASIN|exec\/obidos\/ASIN)\/([A-Z0-9]{10})(?:[/?]|$)/i) || [])[1];
+    if(asin){
+      const got = await getImage('https://images-na.ssl-images-amazon.com/images/P/' +
+                                 asin.toUpperCase() + '.09.LZZZZZZZ.jpg');
+      if(got) return got;
+    }
+  }
+  const r = await fetch(u.href, {redirect:'follow', headers:page});
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
+  if(ct.startsWith('image/')) return getImage(r.url);
+  if(!r.ok || !ct.includes('html')) return null;
+  const html = (await r.text()).slice(0, PAGE_MAX);
+  const src = coverFromHtml(html, r.url);
+  return src ? getImage(src, r.url) : null;
 }
 
 const countRecords = d =>
@@ -145,6 +223,18 @@ export default {
       }
       const list = JSON.parse(await env.RECORDS.get('histlist') || '[]');
       return json({versions:list});
+    }
+
+    /* ---- 参考URLから表紙を探す ---- */
+    if(path === '/og' && req.method === 'POST'){
+      let body; try { body = await req.json(); } catch(e){ return json({error:'読めません'}, 400); }
+      const target = String(body && body.url || '');
+      if(!/^https?:\/\//i.test(target)) return json({error:'URLではありません'}, 400);
+      let got = null;
+      try { got = await fetchCover(target); } catch(e){ got = null; }
+      if(!got) return json({error:'このページからは表紙が見つかりませんでした'}, 404);
+      return reply(got.buf, 200, {'content-type':got.type, 'cache-control':'no-store',
+                                  'x-cover-src':encodeURI(got.src).slice(0, 500)});
     }
 
     /* ---- 表紙画像 ---- */

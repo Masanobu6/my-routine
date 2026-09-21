@@ -178,8 +178,10 @@ body.running #tabs{display:none}
 .cover{width:56px;height:56px;border-radius:14px;flex:none;display:flex;align-items:center;
   justify-content:center;font-size:26px;font-weight:800;color:#fff;
   background:linear-gradient(135deg,var(--c),color-mix(in srgb,var(--c) 55%,#000));
-  background-size:cover;background-position:center;box-shadow:0 2px 6px rgba(0,0,0,.12)}
+  background-size:cover;background-position:center top;box-shadow:0 2px 6px rgba(0,0,0,.12)}
 .cover.has span{display:none}
+.cover.busy{animation:coverpulse 1s ease-in-out infinite alternate}
+@keyframes coverpulse{from{opacity:1}to{opacity:.45}}
 .cover.sm{width:44px;height:44px;border-radius:11px;font-size:20px}
 .cover.xs{width:28px;height:28px;border-radius:8px;font-size:14px;box-shadow:none}
 .cover.xl{width:128px;height:128px;border-radius:26px;font-size:56px}
@@ -229,7 +231,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.4';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.5';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -1047,11 +1049,17 @@ function viewExEdit(){
 
 /* 編集画面：表紙・種類・参考URL（スポット作業と種目で共通） */
 function coverEditor(d){
-  return '<div class="coveredit">' + cover(d, 'xl') + '<div class="cebtns">' +
+  const busy = view.coverBusy;
+  return '<div class="coveredit">' + cover(d, 'xl' + (busy ? ' busy' : '')) + '<div class="cebtns">' +
     '<button class="pill" data-act="pickimg">' + (d.img ? '画像を変える' : '画像をえらぶ') + '</button>' +
-    (d.img ? '<button class="pill ghost" data-act="removeimg">画像を外す</button>' : '') +
-    '<div class="hint">本の表紙や講座のサムネなど。<br>パソコンは Ctrl+V で貼りつけもできます。</div>' +
-    '</div></div>';
+    (safeUrl(d.url) && !busy
+      ? '<button class="pill ghost" data-act="coverurl">🔗 URLから表紙を取る</button>' : '') +
+    (d.img && !busy ? '<button class="pill ghost" data-act="removeimg">画像を外す</button>' : '') +
+    '<div class="hint">' +
+    (busy ? '表紙をさがしています…'
+          : view.coverMsg ? esc(view.coverMsg)
+          : '参考URLを入れると、表紙を自動で取ります。<br>パソコンは Ctrl+V で貼りつけもできます。') +
+    '</div></div></div>';
 }
 function kindPicker(sel){
   let h = '<div class="field"><label>種類</label><div class="cats">';
@@ -1723,17 +1731,41 @@ function shrinkImage(file){
       .then(b => b && b.type === 'image/webp' ? b : new Promise(res => c.toBlob(res, 'image/jpeg', .85)));
   });
 }
-function takeImage(file){
-  if(!file || !view.draft) return;
-  shrinkImage(file)
+function takeImage(file, target){
+  target = target || view.draft;
+  if(!file || !target) return Promise.resolve();
+  return shrinkImage(file)
     .then(blob => {
       const id = 'im-' + (crypto.randomUUID ? crypto.randomUUID() : uid() + uid() + uid());
       return imgPut(id, blob).then(() => {
         imgUrls.set(id, URL.createObjectURL(blob));
-        if(view.draft){ view.draft.img = id; render(); }
+        if(view.draft === target){ target.img = id; render(); }
       });
     })
     .catch(() => alert('この画像は読めませんでした。'));
+}
+/* 参考URLのページから表紙を取る（あずかり所が代わりに読みに行く）。
+   auto=true はURLを入れたときの自動。画像がもうあるときは呼ばない     */
+function coverFromUrl(auto){
+  const d = view.draft, u = d && safeUrl(d.url);
+  if(!u) return;
+  if(!syncReady()){
+    if(!auto) alert('表紙を取るには、記録タブの同期で「Googleで入る」を済ませてください。');
+    return;
+  }
+  view.coverBusy = true; view.coverMsg = '';
+  render();
+  fetch(db.sync.url.replace(/\/+$/, '') + '/og', {method:'POST',
+      headers:Object.assign({'content-type':'application/json'}, authHead()),
+      body:JSON.stringify({url:u})})
+    .then(r => { if(!r.ok) throw r.status; return r.blob(); })
+    .then(b => { if(view.draft !== d) return; view.coverBusy = false; return takeImage(b, d); })
+    .catch(() => {
+      if(view.draft !== d) return;
+      view.coverBusy = false;
+      view.coverMsg = 'このページからは表紙が取れませんでした。画像をえらぶか、貼りつけてください。';
+      render();
+    });
 }
 /* 保存するとき：新しい画像は送り、使わなくなった画像は片づける */
 function settleImg(old, d){
@@ -2044,7 +2076,8 @@ document.getElementById('app').addEventListener('click', ev => {
     save(); return render();
   }
   if(act === 'pickimg'){ document.getElementById('imgfile').click(); return; }
-  if(act === 'removeimg'){ view.draft.img = ''; return render(); }
+  if(act === 'removeimg'){ view.draft.img = ''; view.coverMsg = ''; return render(); }
+  if(act === 'coverurl') return coverFromUrl(false);
   if(act === 'cleardate'){ view.draft.date = ''; return render(); }
 
   // ごほうび
@@ -2149,7 +2182,12 @@ document.getElementById('app').addEventListener('change', ev => {
     saveQuiet();
     return;
   }
-  if(t.dataset.field === 'url' && view.draft){ view.draft.url = normUrl(t.value); render(); return; }
+  if(t.dataset.field === 'url' && view.draft){
+    view.draft.url = normUrl(t.value);
+    view.coverMsg = '';
+    if(!view.draft.img && safeUrl(view.draft.url)) return coverFromUrl(true);
+    render(); return;
+  }
   if(t.dataset.act === 'additem' && t.value){
     view.draft.items.push({exerciseId:t.value, amount:exById(t.value).amount, sets:1, rest:0});
     render();
