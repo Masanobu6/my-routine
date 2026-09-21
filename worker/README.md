@@ -1,17 +1,22 @@
 # 記録のあずかり所（Cloudflare Worker）
 
-スマホのアプリが書き出した記録を置いておく場所。ブログ（mosomoso-history.com/routine）がここを読む。
+アプリのデータを預かり、端末どうしで同期させる場所。ブログ（mosomoso-history.com/routine）の集計もここから読む。
 
-- `GET` … 置いてある JSON を返す。だれでも読める
-- `POST` … あいことば（`x-key` ヘッダ）が合っていれば置きかえる
+| 道 | 中身 | 鍵 |
+|---|---|---|
+| `GET /` | ブログに載せる集計 | いらない（公開） |
+| `POST /` | 集計を置きかえる | 要る |
+| `POST /auth/google` | Google の身分証を確かめ、端末トークンを発行する | いらない（身分証そのものが鍵） |
+| `GET /auth/me` | 誰として入っているか | 要る |
+| `GET /data` / `POST /data` | データ一式。版つき書き込み（食い違えば 409） | 要る |
+| `GET /history`（`?v=N`） | 直近20版の一覧／中身 | 要る |
 
-中身は数字だけ。種目名やスポット作業の名前は入らない。
+「鍵」は `x-token`（Googleで入った端末の合鍵）か `x-key`（あいことば）のどちらか。
+同期の仕組みはリポジトリ直下の README の「同期の作り」を参照。
 
 ## 立ててある場所
 
-**https://records.mosomoso-history.com**（2026-09-20 デプロイ）
-
-KV namespace `RECORDS` は作成ずみで、id は `wrangler.toml` に書いてある（これは秘密ではない）。
+**https://records.mosomoso-history.com**
 
 直したら:
 
@@ -19,26 +24,21 @@ KV namespace `RECORDS` は作成ずみで、id は `wrangler.toml` に書いて�
 cd C:/ClaudeCode/my-routine/worker && npx wrangler deploy
 ```
 
-## あいことば（自分で入れる）
+`wrangler.toml` の `routes` は **`[vars]` より前**に書く。あとに書くと vars の中身として読まれ、
+独自ドメインが外れて workers.dev に出てしまう（2026-09-21 に一度やった）。
 
-```bash
-cd C:/ClaudeCode/my-routine/worker && npx wrangler secret put WRITE_KEY
-```
+## 設定
 
-聞かれたら、自分で決めた長めの文字列を入れる（パスワード管理ソフトで作るとよい）。
-入力は画面に出ない。**この値はリポジトリにも、チャットにも書かない**。公開リポジトリなので、
-書くと誰でも読めて、記録を上書きされる。
+| 名前 | 種類 | 中身 |
+|---|---|---|
+| `RECORDS` | KV | `wrangler.toml` に id（秘密ではない） |
+| `GOOGLE_CLIENT_ID` | var | `wrangler.toml` に書いてある（公開してよい値） |
+| `ALLOW_EMAILS` | secret | 入ってよいGoogleアカウント（カンマ区切り）。公開リポジトリなので書かない |
+| `WRITE_KEY` | secret | あいことば。**リポジトリにもチャットにも書かない** |
 
-## アプリにつなぐ
-
-アプリの「記録」タブ →「自動で送る」に、上のURLとあいことばを入れる。
-この2つはそのスマホの中だけに保存され、書き出すデータには入らない。
-
-## ブログにつなぐ
-
-`mosomoso-history/src/pages/routine.astro` の `DATA_URL` を、上のURLに変える。
+secret は Cloudflare のダッシュボード（Workers → my-routine-records → Settings → Variables）か、
+`npx wrangler secret put 名前` で入れる。
 
 ## お金
 
 無料枠の中に収まる（Workers 10万リクエスト/日、KV 1000書き込み/日）。
-1日に数回送るだけなので、桁がいくつも余る。
