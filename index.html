@@ -71,6 +71,15 @@ h2{font-size:14px;color:var(--muted);font-weight:600;margin:22px 2px 10px;letter
 .days button{flex:1;min-width:0;padding:10px 0;border-radius:9px;border:1px solid var(--line);
   background:var(--card);font-size:14px}
 .days button.on{background:var(--accent);color:#fff;border-color:transparent;font-weight:700}
+.mdays{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.mdays button{padding:9px 0;border-radius:9px;border:1px solid var(--line);background:var(--card);
+  font-size:14px;min-width:0}
+.mdays button.on{background:var(--accent);color:#fff;border-color:transparent;font-weight:700}
+.mdays button.wide{grid-column:span 2}
+.seg{display:flex;gap:4px;margin-bottom:10px}
+.seg button{flex:1;padding:10px 0;border-radius:10px;border:1px solid var(--line);
+  background:var(--card);font-size:14px;font-weight:600}
+.seg button.on{background:var(--text);color:var(--bg);border-color:transparent}
 .mitem{background:var(--card);border:1px solid var(--line);
   border-radius:12px;padding:10px 12px;margin-bottom:8px}
 .mitem .mhead{display:flex;align-items:center;gap:8px}
@@ -231,7 +240,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.5';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.6';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -335,6 +344,11 @@ function migrate(d){
   if(typeof d.version !== 'number') d.version = 0;
   if(!Array.isArray(d.graves)) d.graves = [];
   if(!Array.isArray(d.kinds)) d.kinds = JSON.parse(JSON.stringify(DEFAULT_KINDS));
+  d.menus.forEach(m => {           // 曜日だけだったころのメニュー
+    if(!m.repeat) m.repeat = 'week';
+    if(!Array.isArray(m.days)) m.days = [];
+    if(!Array.isArray(m.dates)) m.dates = [];
+  });
   d.logs.forEach(l => { if(l.mode === 'mini') l.mode = 'full'; });   // ミニ版は廃止した
   if(!d.sync.url) d.sync.url = SYNC_URL;
   d.exercises.forEach(e => {
@@ -367,7 +381,27 @@ function saveQuiet(){ try { localStorage.setItem(KEY, JSON.stringify(db)); } cat
 
 const exById   = id => db.exercises.find(e => e.id === id);
 const menuById = id => db.menus.find(m => m.id === id);
-const menusOn  = date => db.menus.filter(m => m.days.includes(date.getDay()));
+const menusOn  = date => db.menus.filter(m => onDay(m, date));
+/* 毎週（曜日）か、毎月（日付）か。
+   31日など、その月に無い日を指定したときは、その月の最後の日にやる     */
+const lastDateOf = date => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+function onDay(m, date){
+  if(m.repeat === 'month'){
+    const d = date.getDate(), last = lastDateOf(date);
+    return (m.dates || []).some(x =>
+      x === 'end' ? d === last : (x === d || (x > last && d === last)));
+  }
+  return (m.days || []).includes(date.getDay());
+}
+function repeatText(m){
+  if(m.repeat === 'month'){
+    if(!(m.dates || []).length) return '日を決めていない';
+    return '毎月 ' + m.dates.slice().sort((a,b) => (a === 'end' ? 99 : a) - (b === 'end' ? 99 : b))
+      .map(x => x === 'end' ? '月末' : x + '日').join('・');
+  }
+  if(!(m.days || []).length) return '曜日を決めていない';
+  return m.days.length === 7 ? '毎日' : m.days.slice().sort().map(d => DAYS[d]).join('・');
+}
 const logsOn   = ds => db.logs.filter(l => l.date === ds);
 const logFor   = (ds, menuId) => db.logs.find(l => l.date === ds && l.menuId === menuId);
 
@@ -951,10 +985,9 @@ function viewMenus(){
   let h = '<div class="wrap"><div class="head"><div class="date">メニュー</div></div>';
   if(!db.menus.length) h += '<div class="empty">メニューがありません。</div>';
   db.menus.forEach(m => {
-    const days = m.days.length === 7 ? '毎日' : m.days.slice().sort().map(d => DAYS[d]).join('・');
     h += '<button class="row" data-act="editmenu" data-id="' + m.id + '">' +
       '<div><div class="name">' + esc(m.name) + '</div>' +
-      '<div class="meta">' + days + ' ' + (m.time || '') + ' ・ ' + m.items.length + '種目</div></div>' +
+      '<div class="meta">' + repeatText(m) + ' ' + (m.time || '') + ' ・ ' + m.items.length + '種目</div></div>' +
       '<span class="go">›</span></button>';
   });
   return h + '<button class="addbtn" data-act="newmenu">＋ メニューを作る</button></div>';
@@ -965,11 +998,30 @@ function viewMenuEdit(){
   let h = '<div class="wrap"><button class="back" data-act="tab" data-tab="menus">‹ メニュー</button>' +
     '<div class="field"><label>名前</label>' +
     '<input data-field="name" value="' + esc(m.name) + '" placeholder="朝メニュー"></div>' +
-    '<div class="field"><label>やる曜日</label><div class="days">';
-  DAYS.forEach((d,i) => {
-    h += '<button class="' + (m.days.includes(i) ? 'on' : '') + '" data-act="day" data-i="' + i + '">' + d + '</button>';
-  });
-  h += '</div></div><div class="field"><label>時刻（めやす）</label>' +
+    '<div class="field"><label>いつやる</label>' +
+    '<div class="seg">' +
+    '<button class="' + (m.repeat === 'month' ? '' : 'on') + '" data-act="repeat" data-r="week">毎週（曜日）</button>' +
+    '<button class="' + (m.repeat === 'month' ? 'on' : '') + '" data-act="repeat" data-r="month">毎月（日付）</button>' +
+    '</div>';
+  if(m.repeat === 'month'){
+    h += '<div class="mdays">';
+    for(let i = 1; i <= 31; i++){
+      h += '<button class="' + ((m.dates || []).includes(i) ? 'on' : '') +
+           '" data-act="mday" data-d="' + i + '">' + i + '</button>';
+    }
+    h += '<button class="wide ' + ((m.dates || []).includes('end') ? 'on' : '') +
+         '" data-act="mday" data-d="end">月末</button></div>' +
+      '<div style="font-size:12px;color:var(--muted);margin:6px 2px 0">' +
+      '29〜31日は、その月に無ければ月末にやります（2月に31日を選んだ場合など）。</div>';
+  } else {
+    h += '<div class="days">';
+    DAYS.forEach((d,i) => {
+      h += '<button class="' + ((m.days || []).includes(i) ? 'on' : '') +
+           '" data-act="day" data-i="' + i + '">' + d + '</button>';
+    });
+    h += '</div>';
+  }
+  h += '</div><div class="field"><label>時刻（めやす）</label>' +
     '<input type="time" data-field="time" value="' + esc(m.time || '') + '"></div>' +
     '<h2>種目</h2>';
 
@@ -1921,7 +1973,7 @@ document.getElementById('app').addEventListener('click', ev => {
   // メニュー編集
   if(act === 'newmenu'){
     view = {name:'menuEdit', isNew:true,
-            draft:{id:uid(), name:'', days:[1,2,3,4,5], time:'07:00', items:[]}};
+            draft:{id:uid(), name:'', repeat:'week', days:[1,2,3,4,5], dates:[], time:'07:00', items:[]}};
     return render();
   }
   if(act === 'editmenu'){
@@ -1934,6 +1986,14 @@ document.getElementById('app').addEventListener('click', ev => {
     if(at >= 0) d.splice(at, 1); else d.push(i);
     return render();
   }
+  if(act === 'repeat'){ view.draft.repeat = b.dataset.r; return render(); }
+  if(act === 'mday'){
+    const v = b.dataset.d === 'end' ? 'end' : Number(b.dataset.d);
+    const d = view.draft.dates = view.draft.dates || [];
+    const at = d.indexOf(v);
+    if(at >= 0) d.splice(at, 1); else d.push(v);
+    return render();
+  }
   if(act === 'itemdel'){ view.draft.items.splice(Number(b.dataset.i), 1); return render(); }
   if(act === 'itemup'){
     const i = Number(b.dataset.i);
@@ -1943,7 +2003,9 @@ document.getElementById('app').addEventListener('click', ev => {
   if(act === 'savemenu'){
     const d = view.draft;
     if(!d.name.trim()){ alert('名前を入れてください'); return; }
-    if(!d.days.length){ alert('曜日を1つ以上えらんでください'); return; }
+    if(d.repeat === 'month'){
+      if(!(d.dates || []).length){ alert('日を1つ以上えらんでください'); return; }
+    } else if(!d.days.length){ alert('曜日を1つ以上えらんでください'); return; }
     stamp(d);
     const old = menuById(d.id);
     if(old) db.menus[db.menus.indexOf(old)] = d; else db.menus.push(d);
