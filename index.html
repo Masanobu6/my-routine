@@ -212,6 +212,15 @@ body.running #tabs{display:none}
 .spot.done .cover{filter:grayscale(1)}
 .rbody .cover{margin-bottom:12px}
 .rbody .chip.link{font-size:13px;padding:5px 12px;margin-top:6px}
+/* 本のバーコード読み取り */
+#scan{position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column}
+#scan video{flex:1;min-height:0;width:100%;object-fit:cover}
+#scan .aim{position:absolute;left:10%;right:10%;top:32%;height:18%;border:3px solid #fff;
+  border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.35);pointer-events:none}
+#scan .panel{background:var(--card);color:var(--text);padding:16px 16px 22px;border-radius:18px 18px 0 0}
+#scan .panel .row2{display:flex;gap:8px;margin-top:10px}
+#scan .panel input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--bg);color:var(--text);font-size:16px}
 </style>
 </head>
 <body>
@@ -240,7 +249,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.6';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.7';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -1149,7 +1158,10 @@ function viewSpotEdit(){
     coverEditor(s) +
     '<div class="field"><label>やること</label>' +
     '<input data-field="name" value="' + esc(s.name) + '" placeholder="確定申告の書類をそろえる"></div>' +
-    kindPicker(s.kind) + catPicker(s.cat) + urlField(s) +
+    kindPicker(s.kind) +
+    (s.kind === 'kind-book'
+      ? '<button class="addbtn" data-act="scanbook" style="margin:-4px 0 14px">📷 本のバーコードを読む</button>' : '') +
+    catPicker(s.cat) + urlField(s) +
     '<div class="field"><label>目安の時間（分・わからなければ空でいい）</label>' +
     '<input inputmode="numeric" data-field="minutes" value="' + (s.minutes || '') + '">' +
     '<div style="font-size:12px;color:var(--muted);margin:5px 2px 0">' +
@@ -1798,8 +1810,8 @@ function takeImage(file, target){
 }
 /* 参考URLのページから表紙を取る（あずかり所が代わりに読みに行く）。
    auto=true はURLを入れたときの自動。画像がもうあるときは呼ばない     */
-function coverFromUrl(auto){
-  const d = view.draft, u = d && safeUrl(d.url);
+function coverFromUrl(auto, src){
+  const d = view.draft, u = src || (d && safeUrl(d.url));
   if(!u) return;
   if(!syncReady()){
     if(!auto) alert('表紙を取るには、記録タブの同期で「Googleで入る」を済ませてください。');
@@ -1854,6 +1866,128 @@ function dropImg(id){
   if(u){ URL.revokeObjectURL(u); imgUrls.delete(id); }
   if(syncReady()) fetch(imgBase() + id, {method:'DELETE', headers:authHead()}).catch(() => {});
 }
+/* ========== 本のバーコード ==========
+   カメラで ISBN（978/979 で始まるほうのバーコード）を読み、openBD で書名を引く。
+   参考URLは Amazon の商品ページ（本は ISBN-10 がそのまま商品番号）にして、
+   表紙はいつもの「URLから表紙を取る」で入れる。
+   カメラで読めない端末（PCなど）は、ISBN を手で入れる。                 */
+function isbn13(raw){
+  const s = String(raw || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+  if(/^97[89]\d{10}$/.test(s)){
+    let sum = 0;
+    for(let i = 0; i < 12; i++) sum += Number(s[i]) * (i % 2 ? 3 : 1);
+    return (10 - sum % 10) % 10 === Number(s[12]) ? s : '';
+  }
+  if(/^\d{9}[\dX]$/.test(s)){
+    let sum = 0;
+    for(let i = 0; i < 10; i++) sum += (s[i] === 'X' ? 10 : Number(s[i])) * (10 - i);
+    if(sum % 11) return '';
+    const b = '978' + s.slice(0, 9);
+    let t = 0;
+    for(let i = 0; i < 12; i++) t += Number(b[i]) * (i % 2 ? 3 : 1);
+    return b + (10 - t % 10) % 10;
+  }
+  return '';
+}
+function isbn10(i13){
+  if(!i13.startsWith('978')) return '';
+  const b = i13.slice(3, 12);
+  let sum = 0;
+  for(let i = 0; i < 9; i++) sum += Number(b[i]) * (10 - i);
+  const c = (11 - sum % 11) % 11;
+  return b + (c === 10 ? 'X' : c);
+}
+function bookUrl(i13){
+  const i10 = isbn10(i13);
+  return i10 ? 'https://www.amazon.co.jp/dp/' + i10 : 'https://www.hanmoto.com/bd/isbn/' + i13;
+}
+
+let scanStop = null;
+function openScanner(){
+  closeScanner();
+  const box = document.createElement('div');
+  box.id = 'scan';
+  const canCam = 'BarcodeDetector' in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  box.innerHTML = (canCam ? '<video playsinline muted></video><div class="aim"></div>' : '<div style="flex:1"></div>') +
+    '<div class="panel"><div id="scanmsg" class="hint" style="font-size:13px">' +
+    (canCam ? '本の裏の、978 で始まるほうのバーコードを枠に入れてください。'
+            : 'この端末ではカメラで読めません。ISBN（本の裏の 978… の数字）を入れてください。') +
+    '</div><div class="row2"><input id="scanisbn" inputmode="numeric" placeholder="ISBN（978…）">' +
+    '<button class="pill" id="scanok">決める</button></div>' +
+    '<div class="row2"><button class="pill ghost" id="scanclose" style="flex:1">やめる</button></div></div>';
+  document.body.appendChild(box);
+  const msg = t => { document.getElementById('scanmsg').textContent = t; };
+  const done = code => { closeScanner(); if(navigator.vibrate) navigator.vibrate(60); takeBook(code); };
+  document.getElementById('scanclose').onclick = closeScanner;
+  document.getElementById('scanok').onclick = () => {
+    const code = isbn13(document.getElementById('scanisbn').value);
+    if(!code) return msg('ISBN の数字が合いません。978 から始まる13けた（または10けた）を入れてください。');
+    done(code);
+  };
+  if(!canCam){ document.getElementById('scanisbn').focus(); return; }
+
+  let alive = true, stream = null, timer = 0;
+  scanStop = () => {
+    alive = false; clearTimeout(timer);
+    if(stream) stream.getTracks().forEach(t => t.stop());
+  };
+  const video = box.querySelector('video');
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false})
+    .then(s => {
+      stream = s;
+      if(!alive) return scanStop();
+      video.srcObject = s;
+      return video.play();
+    })
+    .then(() => {
+      if(!alive) return;
+      const det = new BarcodeDetector({formats:['ean_13']});
+      const tick = () => {
+        if(!alive) return;
+        det.detect(video)
+          .then(list => {
+            const hit = list.map(b => isbn13(b.rawValue)).find(Boolean);
+            if(hit && alive) done(hit); else timer = setTimeout(tick, 200);
+          })
+          .catch(() => { timer = setTimeout(tick, 400); });
+      };
+      tick();
+    })
+    .catch(() => {
+      if(!alive) return;
+      box.querySelector('video').remove();
+      box.querySelector('.aim').remove();
+      box.insertBefore(document.createElement('div'), box.firstChild).style.flex = '1';
+      msg('カメラが使えませんでした。ISBN（本の裏の 978… の数字）を入れてください。');
+    });
+}
+function closeScanner(){
+  if(scanStop){ scanStop(); scanStop = null; }
+  const box = document.getElementById('scan');
+  if(box) box.remove();
+}
+/* 読んだ ISBN をいま編集中のスポット作業に入れる */
+function takeBook(i13){
+  const d = view.draft;
+  if(!d || view.name !== 'spotEdit') return;
+  d.url = bookUrl(i13);
+  d.kind = 'kind-book';
+  view.coverMsg = '';
+  render();
+  fetch('https://api.openbd.jp/v1/get?isbn=' + i13)
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null)
+    .then(j => {
+      if(view.draft !== d) return;
+      const b = j && j[0] && j[0].summary;
+      if(b && b.title && !d.name.trim()){
+        d.name = b.title.split(/\s+:\s+/)[0] + (b.volume ? ' ' + b.volume : '');
+      }
+      render();
+      if(!d.img) coverFromUrl(true, b && safeUrl(b.cover) ? b.cover : '');
+    });
+}
+
 function normUrl(u){
   u = String(u || '').trim();
   if(u && !/^https?:\/\//i.test(u) && /\./.test(u)) u = 'https://' + u;
@@ -2057,6 +2191,7 @@ document.getElementById('app').addEventListener('click', ev => {
     view = {name:'spotEdit', isNew:false, draft:Object.assign({}, spotById(id))};
     return render();
   }
+  if(act === 'scanbook') return openScanner();
   if(act === 'savespot'){
     const d = view.draft;
     if(!d.name.trim()){ alert('やることを書いてください'); return; }
