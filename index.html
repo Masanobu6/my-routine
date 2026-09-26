@@ -249,7 +249,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.7';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '2.8';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -511,7 +511,7 @@ function runPoints(complete){
 }
 
 /* ========== サイトに載せる用の書き出し ==========
-   公開するのは数字だけ。種目名・作業名・ごほうびの中身は入れない。     */
+   種目名・作業名と、その参考URLまでは載せる。ごほうびの中身は入れない。 */
 function summary(){
   const now = new Date();
   const days = {};
@@ -523,10 +523,11 @@ function summary(){
   };
   // 明細：何に時間を使ったかを、名前ごとにまとめる
   const items = {};
-  const bumpItem = (name, cat, min) => {
+  const bumpItem = (name, cat, min, url) => {
     const k = cat + ' ' + name;
     const it = items[k] = items[k] || {name, cat, times:0, minutes:0};
     it.times++; it.minutes += min;
+    if(!it.url && safeUrl(url)) it.url = url;   // 参考URLがあればブログ側でリンクになる
   };
 
   db.logs.forEach(l => {
@@ -537,7 +538,8 @@ function summary(){
       day.min += l.minutes || 0;
       day.lv = day.lv >= 1 ? 3 : 1;
       bumpCat(l.cat || 'other', 1, l.minutes || 0, l.points || 0);
-      if(l.name) bumpItem(l.name, l.cat || 'other', l.minutes || 0);
+      const s = spotById(l.spotId);
+      if(l.name) bumpItem(l.name, l.cat || 'other', l.minutes || 0, s && s.url);
       return;
     }
     const done = (l.entries || []).filter(en => en.done);
@@ -552,7 +554,7 @@ function summary(){
       day.min += min;
       bumpCat(e.cat, 1, min, Math.round(weight ? (l.points || 0) * min / weight
                                                : (l.points || 0) / done.length));
-      bumpItem(e.name, e.cat, min);
+      bumpItem(e.name, e.cat, min, e.url);
     });
     day.lv = day.lv >= 1 ? 3 : (l.mode === 'full' ? 2 : 1);   // part は 1
   });
