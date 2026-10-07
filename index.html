@@ -31,6 +31,7 @@ button{cursor:pointer;border:none;background:none}
 
 .head{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 14px}
 .head .date{font-size:22px;font-weight:700;letter-spacing:.02em}
+.daybtn{font-size:20px;line-height:1;padding:2px 10px;border:1px solid var(--line,#ccc);border-radius:8px;background:none;color:inherit;vertical-align:middle}
 .head .sub{font-size:13px;color:var(--muted)}
 .streak{font-size:13px;color:var(--accent);font-weight:600;white-space:nowrap}
 
@@ -249,7 +250,7 @@ body.running #tabs{display:none}
 
 /* ========== 基本 ========== */
 const KEY = 'myroutine.v1';
-const BUILD = '2.9';   // スマホで見てもらうとき、どの版かが分かるように
+const BUILD = '3.0';   // スマホで見てもらうとき、どの版かが分かるように
 const UNITS = ['回','分','秒','セット','ページ','個','km','チェック'];
 const DAYS = ['日','月','火','水','木','金','土'];
 const COLORS = {orange:'#e0672f', green:'#4c9a5a', blue:'#3b7ea1',
@@ -282,7 +283,10 @@ const uid = () => Math.random().toString(36).slice(2,9);
 const pad = n => String(n).padStart(2,'0');
 const fmtDate = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const parseDate = s => { const a = s.split('-').map(Number); return new Date(a[0], a[1]-1, a[2]); };
-const todayStr = () => fmtDate(new Date());
+// 0時を越えて前の日の記録をつけたいときは viewDate に日付を入れる（null なら本当の今日）
+let viewDate = null;
+const realToday = () => fmtDate(new Date());
+const todayStr = () => viewDate || realToday();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const addDays = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
 
@@ -433,7 +437,7 @@ function minutesText(m){
 function todayMinutes(){
   const ds = todayStr();
   let m = 0;
-  menusOn(new Date()).forEach(mn => {
+  menusOn(parseDate(ds)).forEach(mn => {
     const log = logFor(ds, mn.id);
     if(log && log.mode !== 'part') return;                 // 終わった・休んだメニューは数えない
     const done = log ? (log.entries || []).filter(en => en.done).map(en => en.exerciseId) : [];
@@ -834,7 +838,7 @@ function streak(){
 
 /* ========== 画面：今日 ========== */
 function viewToday(){
-  const now = new Date(), ds = todayStr();
+  const ds = todayStr(), now = parseDate(ds);
   const list = menusOn(now).slice().sort((a,b) => (a.time||'').localeCompare(b.time||''));
   const others = db.menus.filter(m => !list.includes(m));
   const st = streak();
@@ -848,7 +852,9 @@ function viewToday(){
                (spots.length ? 'スポット ' + spots.length + '件' : '');
 
   let h = '<div class="wrap"><div class="head"><div>' +
-    '<div class="date">' + (now.getMonth()+1) + '月' + now.getDate() + '日(' + DAYS[now.getDay()] + ')</div>' +
+    '<div class="date"><button class="daybtn" data-act="prevday" aria-label="前の日">‹</button> ' +
+      (now.getMonth()+1) + '月' + now.getDate() + '日(' + DAYS[now.getDay()] + ')' +
+      (viewDate ? ' <button class="daybtn" data-act="nextday" aria-label="次の日">›</button>' : '') + '</div>' +
     '<div class="sub">' + (rest ? 'のこり ' + rest + (mins ? ' ・ ' + minutesText(mins) : '') : '今日の分はもうありません') + '</div>' +
     '</div><div class="headright">' +
     '<div class="ptpill">★ ' + balance() + ' pt</div>' +
@@ -860,6 +866,12 @@ function viewToday(){
         (db.sync.email ? esc(db.sync.email) : 'この端末：' + esc(db.sync.device || '名前なし')) +
         (db.sync.last ? ' ・ ' + esc(db.sync.last) : ' ・ まだ同期していません') + '</div>'
       : '');
+
+  if(viewDate) h += '<div class="card" style="border-color:var(--accent)"><div class="items" style="-webkit-line-clamp:none;display:block">' +
+    '<b>' + mdText(ds) + ' の記録をつけています</b>（今日ではありません）<br>' +
+    '日にちを選ぶ：<input type="date" id="pickday" value="' + ds + '" max="' + realToday() + '"></div>' +
+    '<div class="btns"><button class="primary" data-act="gototoday">今日にもどる</button></div></div>';
+  else h += '<div class="sub" style="margin:-6px 2px 10px;font-size:12px">きのうの分をつけ忘れたら、日付の左の ‹ を押します</div>';
 
   if(allDone) h += '<div class="praise">今日の分、ぜんぶ終わりました 🎉</div>';
 
@@ -2034,6 +2046,13 @@ function render(){
   });
 }
 function go(name){ view = {name}; render(); }
+document.getElementById('app').addEventListener('change', ev => {
+  if(ev.target.id !== 'pickday') return;
+  const v = ev.target.value;
+  if(!v) return;
+  viewDate = v >= realToday() ? null : v;
+  render();
+});
 
 /* ========== 操作 ========== */
 document.getElementById('tabs').addEventListener('click', ev => {
@@ -2048,6 +2067,12 @@ document.getElementById('app').addEventListener('click', ev => {
   const act = b.dataset.act, id = b.dataset.id;
 
   if(act === 'tab') return go(b.dataset.tab);
+  if(act === 'prevday'){ viewDate = fmtDate(addDays(parseDate(todayStr()), -1)); return render(); }
+  if(act === 'nextday'){
+    const n = fmtDate(addDays(parseDate(todayStr()), 1));
+    viewDate = n >= realToday() ? null : n; return render();
+  }
+  if(act === 'gototoday'){ viewDate = null; return render(); }
 
   // 今日
   if(act === 'start')      return startRun(id);
